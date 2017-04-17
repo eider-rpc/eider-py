@@ -3,6 +3,7 @@
 from setuptools import setup
 
 # Extract version string from module without importing it
+__version__ = 'unknown'
 with open('eider.py') as fin:
     for line in fin:
         if line.startswith('__version__ = '):
