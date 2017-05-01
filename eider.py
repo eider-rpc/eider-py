@@ -1393,6 +1393,9 @@ class BlockingConnection:
         try:
             self.conn.close()
             self.conn.loop.run_until_complete(self.conn.wait_closed())
+        except CancelledError:
+            # This can happen during garbage collection at process exit.
+            pass
         except ProtocolError as exc:
             self.conn.logger.warning(exc.msg)
         except Exception:
