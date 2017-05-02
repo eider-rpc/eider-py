@@ -707,6 +707,7 @@ class RemoteSessionManaged(RemoteSessionBase):
     
     def __init__(self, conn, rsid, lformat=None, rformat=None, dstid=None):
         super().__init__(conn, rsid, lformat, dstid)
+        self.closed = True  # set temporarily in case _open() raises
         
         # For efficiency, we want to allow the session to be used without having to wait first to
         # see if the call to open it was successful.  Pretty much the only way this call can fail
@@ -1362,10 +1363,6 @@ class BlockingSessionMixin:
 class BlockingSession(BlockingSessionMixin, RemoteSession):
     
     __slots__ = ()
-    
-    def __init__(self, *args, **kwargs):
-        self.closed = True  # set temporarily in case _open() raises
-        super().__init__(*args, **kwargs)
     
     def _open(self, rformat):
         # Efficiency is less of a concern here than in the asynchronous RemoteSession, so we raise
