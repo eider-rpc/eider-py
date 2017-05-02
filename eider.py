@@ -324,7 +324,7 @@ class NativeFunction:
 
 class NativeLocalSession(LocalSession):
     
-    __slots__ = ('refs')
+    __slots__ = ('refs',)
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
