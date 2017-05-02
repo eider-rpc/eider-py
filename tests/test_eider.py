@@ -256,11 +256,6 @@ def rroot_codec(conn):
         yield rroot
 
 @pytest.yield_fixture
-def rroot_pickle(conn):
-    with conn.create_session('pickle', 'pickle') as rroot:
-        yield rroot
-
-@pytest.yield_fixture
 def rroot_msgpack(conn):
     with conn.create_session('msgpack', 'msgpack') as rroot:
         yield rroot
@@ -498,15 +493,6 @@ def test_bridge_callback(lroot, broot):
 def test_bridge_callfront(broot):
     """Call a bridged method across a bridge."""
     assert 'a+b+c' == broot.call(broot.join, '+', 'abc')
-
-def test_pickle(rroot_pickle):
-    """Call using pickle codec."""
-    assert 11 == rroot_pickle.sum(67, -59, 3)
-
-def test_pickle_binary(rroot_pickle):
-    """Pass binary data using pickle."""
-    buf = bytes(range(7))
-    assert buf == rroot_pickle.passthru(buf)
 
 def test_msgpack(rroot_msgpack):
     """Call using msgpack codec."""

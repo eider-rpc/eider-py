@@ -24,10 +24,9 @@ import builtins
 from collections import defaultdict
 from functools import partial
 from inspect import getdoc, Parameter, signature, Signature
-from io import BytesIO, StringIO
+from io import StringIO
 from json import dumps, loads as decode
 from logging import getLogger
-from pickle import loads as pickle_decode, Pickler
 from threading import local
 from traceback import print_exception
 from types import FunctionType, MethodType
@@ -116,20 +115,6 @@ def encode(conn, data):
 
 Codec('json', encode, decode)
 
-def pickle_method(method):
-    return (dict, (dict(method.__self__._marshal(),
-                        method=method.__name__),))
-
-class MarshallingPickler(Pickler):
-    dispatch_table = {MethodType: pickle_method}
-
-def pickle_encode(conn, data):
-    stream = BytesIO()
-    MarshallingPickler(stream).dump(data)
-    return stream.getvalue()
-
-Codec('pickle', pickle_encode, pickle_decode)
-
 try:
     from msgpack import ExtType, packb, unpackb
 except ImportError:
@@ -215,14 +200,7 @@ class RemoteError(Exception):
 
 Error = Exception  # for JavaScript
 
-class Picklable:
-    
-    __slots__ = ()
-    
-    def __reduce__(self):
-        return (dict, (self._marshal(),))
-
-class Reference(Picklable):
+class Reference:
     
     __slots__ = ('ref',)
     
@@ -373,7 +351,7 @@ class NativeLocalSession(LocalSession):
             return NativeFunction(obj)
         return obj
 
-class LocalObjectBase(Picklable):
+class LocalObjectBase:
     
     __slots__ = ('_lsession', '_loid', '_lref', '_nref')
     
@@ -404,7 +382,7 @@ class LocalObjectBase(Picklable):
     
     def taxa(self):
         """Get a list of names of the object's base classes."""
-        return [c.__name__ for c in self.__class__.__mro__][:-4]  # exclude eider classes
+        return [c.__name__ for c in self.__class__.__mro__][:-3]  # exclude eider classes
     
     def signature(self, method):
         """Get method type signature."""
@@ -501,7 +479,7 @@ class LocalObject(LocalObjectBase):
     def __init__(self, lsession):
         super().__init__(lsession, lsession.add(self))
 
-class RemoteMethod(Picklable):
+class RemoteMethod:
     
     __slots__ = ('robj', 'method')
     
@@ -522,7 +500,7 @@ class RemoteMethod(Picklable):
     def signature(self):
         return self.robj.signature(self)
 
-class RemoteObject(Picklable):
+class RemoteObject:
     
     __slots__ = ('_rsession', '_rref', '_closed')
     
