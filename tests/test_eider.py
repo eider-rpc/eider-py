@@ -351,7 +351,7 @@ def test_error_runtime(rroot):
 def test_refcount(rroot):
     """Release a remote object."""
     n = rroot.num_objects()
-    with rroot.new_Value(0) as rval:
+    with rroot.new_Value(0):
         assert n + 1 == rroot.num_objects()
     assert n == rroot.num_objects()
 
