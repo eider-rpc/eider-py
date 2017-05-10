@@ -136,6 +136,9 @@ class API(eider.LocalRoot):
     
     _newables = [Value, Range, Sequence]
     
+    def num_objects(self):
+        return len(self._lsession.objects)
+    
     def call(self, f, *args):
         return f(*args)
     
@@ -344,6 +347,22 @@ def test_error_runtime(rroot):
         assert isinstance(exc.__cause__, eider.RemoteError)
         return
     assert False
+
+def test_refcount(rroot):
+    """Release a remote object."""
+    n = rroot.num_objects()
+    with rroot.new_Value(0) as rval:
+        assert n + 1 == rroot.num_objects()
+    assert n == rroot.num_objects()
+
+def test_gc(rroot):
+    """Garbage-collect a remote object."""
+    n = rroot.num_objects()
+    rval = rroot.new_Value(0)
+    assert n + 1 == rroot.num_objects()
+    del rval
+    collect()
+    assert n == rroot.num_objects()
 
 def test_with(rroot):
     """Try to access a remote object after it has been released."""
