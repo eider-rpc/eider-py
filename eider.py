@@ -529,7 +529,7 @@ class RemoteObject:
         else:
             self._closed = True
             try:
-                did = self._doclose()
+                did = self._rsession.call(self._rref, 'release')
             except DisconnectedError:
                 fut.set_result(None)  # direct connection is already dead
             except Exception as exc:
@@ -546,9 +546,6 @@ class RemoteObject:
                         fut.set_result(None)  # object successfully released
                 did.add_done_callback(done)
         return fut
-    
-    def _doclose(self):
-        return self.release()
     
     def __enter__(self):
         return self
@@ -641,7 +638,7 @@ class RemoteSessionBase(Session):
         self.rsid = rsid
         self.dstid = dstid
     
-    def call(self, robj, method, params):
+    def call(self, robj, method, params=[]):
         conn = self.conn
         rcid = conn.nextrcid
         conn.nextrcid += 1
@@ -1260,10 +1257,6 @@ class BlockingObject(RemoteObject):
     
     def __getattr__(self, name):
         return BlockingMethod(self, name)
-    
-    def _doclose(self):
-        # don't block; this could be called from __del__
-        return RemoteMethod.__call__(self.release)
     
     def __setattr__(self, name, value):
         """syntactic sugar: 'obj.prop = val' --> 'obj.set_prop(val)'"""
