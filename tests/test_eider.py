@@ -20,7 +20,7 @@
 """
 
 from asyncio import (CancelledError, coroutine, get_event_loop, Future, new_event_loop,
-                     TimeoutError, wait_for)
+                     sleep, TimeoutError, wait_for)
 from functools import reduce
 from gc import collect
 from inspect import signature
@@ -113,7 +113,6 @@ class Range(eider.LocalObject):
         self._stop = stop
     
     def iter(self):
-        self.addref()
         return self
     
     def next(self):
@@ -191,7 +190,8 @@ class RemoteAPI(API):
         return [(yield from f(x)) for x in xs] if async else list(map(f, xs))
     
     def getattr(self, obj, attr):
-        return getattr(obj, attr)
+        with obj as o:
+            return getattr(o, attr)
     
     def set_target(self):
         RemoteAPI.target.set_result(self._lsession.conn)
@@ -361,13 +361,27 @@ def test_gc(rroot):
     rval = rroot.new_Value(0)
     assert n + 1 == rroot.num_objects()
     del rval
+    
+    # make sure RemoteObject._close() (triggered by RemoteObject.__del__) completes
     collect()
+    get_event_loop().run_until_complete(sleep(0.1))
+    
     assert n == rroot.num_objects()
 
 def test_with(rroot):
     """Try to access a remote object after it has been released."""
     with rroot.new_Value(42) as rval:
         rval.add(1)
+    try:
+        rval.val()
+    except LookupError:
+        return
+    assert False
+
+def test_session(conn):
+    """Try to access a remote object after its session has been closed."""
+    with conn.create_session() as rroot:
+        rval = rroot.new_Value(0)
     try:
         rval.val()
     except LookupError:
@@ -470,8 +484,13 @@ def test_lobject(lroot, rroot):
 
 def test_native_marshal(rroot):
     """Pass a native object to a remote call."""
-    n = NativeObject(42)
-    assert n is rroot.passthru(n)
+    # native objects are wrapped in proxies, so we can't directly check their identities
+    x = {}
+    n = NativeObject(x)
+    assert n.x is rroot.passthru(n).x
+    
+    # native functions can be checked for identity equality
+    assert native_function is rroot.passthru(native_function)
 
 def test_native_callback(rroot):
     """Call a native method remotely."""
@@ -496,6 +515,16 @@ def test_native_gc(rroot):
 def test_bridge(broot):
     """Call a bridged method locally."""
     assert 'bridges are neat' == broot.join(' ', 'bridges    are    neat'.split())
+
+def test_bridge_session(rroot, target):
+    """Try to access a bridged object after its bridge has been closed."""
+    with rroot.bridge() as broot:
+        bval = broot.new_Value(0)
+    try:
+        bval.val()
+    except LookupError:
+        return
+    assert False
 
 def test_bridge_error(broot):
     """Call a bridged method that raises an exception."""

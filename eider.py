@@ -297,9 +297,7 @@ class LocalSession(Session):
             # don't use a real RemoteSession, because we don't manage its lifetime
             rsession = RemoteSessionBase(self.conn, ref['lsid'], None, srcid)
             rsession.lcodec = self.lcodec
-            robj = rsession.unmarshal_id(oid)
-            robj._closed = True  # callbacks do not need to be released
-            return robj
+            return rsession.unmarshal_id(oid)
         
         lsid = ref.get('rsid')
         lsession = self.conn.lsessions.get(lsid)
@@ -321,6 +319,24 @@ class NativeFunction:
     
     def __init__(self, f):
         self.call = f
+    
+    def release(self):
+        # native functions aren't refcounted
+        pass
+
+class NativeObject:
+    
+    def __init__(self, obj):
+        self.obj = obj
+    
+    def __getattribute__(self, name):
+        if name == 'release':
+            return object.__getattribute__(self, name)
+        return getattr(object.__getattribute__(self, 'obj'), name)
+    
+    def release(self):
+        # native objects aren't refcounted
+        pass
 
 class NativeLocalSession(LocalSession):
     
@@ -349,7 +365,7 @@ class NativeLocalSession(LocalSession):
         
         if isinstance(obj, FunctionType):
             return NativeFunction(obj)
-        return obj
+        return NativeObject(obj)
 
 class LocalObjectBase:
     
@@ -359,7 +375,6 @@ class LocalObjectBase:
         self._lsession = lsession
         self._loid = loid
         self._lref = {OBJECT_ID: loid, 'lsid': lsession.lsid}
-        self._nref = 1
     
     def addref(self):
         """Increment the object's reference count."""
@@ -369,7 +384,7 @@ class LocalObjectBase:
         """Decrement the object's reference count.  When the reference count reaches zero, it will
         be removed from memory."""
         self._nref -= 1
-        if not self._nref:
+        if self._nref <= 0:
             self._release()
     
     def help(self, method=None):
@@ -396,9 +411,11 @@ class LocalObjectBase:
         pass
     
     def _marshal(self):
+        self._nref += 1
         return self._lref
     
     def __enter__(self):
+        self._nref += 1
         return self
     
     def __exit__(self, exc_type, exc_value, traceback):
@@ -455,6 +472,8 @@ class LocalRoot(LocalObjectBase, metaclass=LocalRootType):
     
     def __init__(self, lsession):
         super().__init__(lsession, None)
+        # root objects are born with one implicit reference
+        self._nref = 1
     
     def _close(self):
         # close all objects in session
@@ -478,6 +497,8 @@ class LocalObject(LocalObjectBase):
     
     def __init__(self, lsession):
         super().__init__(lsession, lsession.add(self))
+        # this object has no references until it is marshalled
+        self._nref = 0
 
 class RemoteMethod:
     
@@ -493,6 +514,15 @@ class RemoteMethod:
     def _marshal(self):
         return dict(self.robj._marshal(),
                     method=self.method)
+    
+    def close(self):
+        return self.robj._close()
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
     
     def help(self):
         return self.robj.help(self)
@@ -524,24 +554,25 @@ class RemoteObject:
         # If the session or the connection or the bridged connection is already closed, then don't
         # raise an error, because the remote object is already dead.
         fut = Future(loop=self._rsession.conn.loop)
-        if self._closed or self._rsession.closed:
-            fut.set_result(None)  # already closed
+        if self._closed:
+            fut.set_result(None)  # object is already closed
         else:
             self._closed = True
             try:
-                did = self._rsession.call(self._rref, 'release')
+                did = self._rsession.call(Reference(self._rref), 'release')
             except DisconnectedError:
                 fut.set_result(None)  # direct connection is already dead
             except Exception as exc:
-                fut.set_exception(exc)
+                fut.set_exception(exc)  # unexpected
             else:
                 def done(did):
                     try:
                         did.result()
-                    except DisconnectedError:
-                        fut.set_result(None)  # connection (direct or bridged) is now dead
+                    except (DisconnectedError,  # connection (direct or bridged) is now dead
+                            LookupError):  # session is already closed
+                        fut.set_result(None)
                     except Exception as exc:
-                        fut.set_exception(exc)
+                        fut.set_exception(exc)  # unexpected
                     else:
                         fut.set_result(None)  # object successfully released
                 did.add_done_callback(done)
@@ -553,7 +584,9 @@ class RemoteObject:
     def __exit__(self, exc_type, exc_value, traceback):
         self._close()
     
-    __del__ = _close
+    def __del__(self):
+        # this can be executed in a different thread
+        self._rsession.conn.loop.call_soon_threadsafe(self._close)
     
     def __aiter__(self):
         return RemoteIterator(self)
@@ -678,11 +711,10 @@ class RemoteSessionBase(Session):
 
 class RemoteSessionManaged(RemoteSessionBase):
     
-    __slots__ = ('closed', '_root')
+    __slots__ = ('_root',)
     
     def __init__(self, conn, rsid, lformat=None, rformat=None, dstid=None):
         super().__init__(conn, rsid, lformat, dstid)
-        self.closed = True  # set temporarily in case _open() raises
         
         # For efficiency, we want to allow the session to be used without having to wait first to
         # see if the call to open it was successful.  Pretty much the only way this call can fail
@@ -697,18 +729,10 @@ class RemoteSessionManaged(RemoteSessionBase):
                     pass
             fut.add_done_callback(done)
         
-        self.closed = False
         self._root = self.unmarshal_id(None)
     
     def root(self):
         return self._root
-    
-    def close(self):
-        if not self.closed:
-            self.closed = True
-            self._close()
-    
-    __del__ = close
     
     @coroutine
     def __aenter__(self):
@@ -730,7 +754,7 @@ class RemoteSession(RemoteSessionManaged):
     def _open(self, rformat):
         return self.call(None, 'open', [self.rsid, rformat])
     
-    def _close(self):
+    def close(self):
         return self._root._close()
 
 class BridgedSession(RemoteSessionManaged):
@@ -740,11 +764,12 @@ class BridgedSession(RemoteSessionManaged):
     def __init__(self, bridge, spec):
         super().__init__(bridge._rsession.conn, spec['rsid'], spec['lformat'], dstid=spec['dst'])
         self.bridge = bridge
+        self._root._closed = True  # the bridge automatically closes the session for us
     
     def _open(self, rformat):
         pass  # the bridge automatically opens the session for us
     
-    def _close(self):
+    def close(self):
         return self.bridge._close()
 
 class Bridge(LocalObject):
