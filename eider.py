@@ -825,6 +825,7 @@ class Connection(object):
         self.lcalls = {}  # local calls
         self.rcalls = {}  # remote calls
         self.bcalls = defaultdict(set)  # bridged calls
+        self.nextlsid = -2  # next local session id
         self.nextrsid = 0  # next remote session id
         self.nextrcid = 0  # next remote call id
         
@@ -850,7 +851,10 @@ class Connection(object):
         if self.closed:
             raise DisconnectedError('Connection closed' if opened else 'Could not connect')
     
-    def create_local_session(self, lsid=-2, root_factory=None, lformat=None):
+    def create_local_session(self, lsid=None, root_factory=None, lformat=None):
+        if lsid is None:
+            lsid = self.nextlsid
+            self.nextlsid -= 1
         return LocalSession(self, lsid, root_factory, lformat)
     
     def create_session(self, lformat=None, rformat=None):
