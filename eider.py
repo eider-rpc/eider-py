@@ -733,14 +733,6 @@ class RemoteSessionManaged(RemoteSessionBase):
     
     def root(self):
         return self._root
-    
-    @coroutine
-    def __aenter__(self):
-        return self._root
-    
-    @coroutine
-    def __aexit__(self, exc_type, exc_val, exc_tb):
-        self.close()
 
 class RemoteSession(RemoteSessionManaged):
     
