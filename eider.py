@@ -319,24 +319,6 @@ class NativeFunction:
     
     def __init__(self, f):
         self.call = f
-    
-    def release(self):
-        # native functions aren't refcounted
-        pass
-
-class NativeObject:
-    
-    def __init__(self, obj):
-        self.obj = obj
-    
-    def __getattribute__(self, name):
-        if name == 'release':
-            return object.__getattribute__(self, name)
-        return getattr(object.__getattribute__(self, 'obj'), name)
-    
-    def release(self):
-        # native objects aren't refcounted
-        pass
 
 class NativeLocalSession(LocalSession):
     
@@ -365,7 +347,7 @@ class NativeLocalSession(LocalSession):
         
         if isinstance(obj, FunctionType):
             return NativeFunction(obj)
-        return NativeObject(obj)
+        return obj
 
 class LocalObjectBase:
     
@@ -536,8 +518,9 @@ class RemoteObject:
     
     def __init__(self, rsession, roid):
         self._rsession = rsession
-        self._rref = {OBJECT_ID: roid, 'rsid': rsession.rsid}
-        self._closed = False
+        rsid = rsession.rsid
+        self._rref = {OBJECT_ID: roid, 'rsid': rsid}
+        self._closed = (rsid == -1)  # native objects aren't refcounted
     
     def __getattr__(self, name):
         return RemoteMethod(self, name)
@@ -559,7 +542,7 @@ class RemoteObject:
         else:
             self._closed = True
             try:
-                did = self._rsession.call(Reference(self._rref), 'release')
+                did = self._rsession.call(self, 'release')
             except DisconnectedError:
                 fut.set_result(None)  # direct connection is already dead
             except Exception as exc:

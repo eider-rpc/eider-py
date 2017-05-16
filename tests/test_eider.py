@@ -484,12 +484,8 @@ def test_lobject(lroot, rroot):
 
 def test_native_marshal(rroot):
     """Pass a native object to a remote call."""
-    # native objects are wrapped in proxies, so we can't directly check their identities
-    x = {}
-    n = NativeObject(x)
-    assert n.x is rroot.passthru(n).x
-    
-    # native functions can be checked for identity equality
+    n = NativeObject(42)
+    assert n is rroot.passthru(n)
     assert native_function is rroot.passthru(native_function)
 
 def test_native_callback(rroot):
