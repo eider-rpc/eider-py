@@ -30,7 +30,6 @@ from logging import getLogger
 from threading import local
 from traceback import print_exception
 from types import FunctionType, MethodType
-from weakref import WeakValueDictionary
 
 from aiohttp import __version__ as aiohttp_version, ClientSession, WSCloseCode, WSMsgType
 from aiohttp.web import Application, run_app, WebSocketResponse
@@ -299,11 +298,7 @@ class LocalSession(Session):
             rsession.lcodec = self.lcodec
             return rsession.unmarshal_id(oid)
         
-        lsid = ref.get('rsid')
-        lsession = self.conn.lsessions.get(lsid)
-        if lsession is None:
-            raise LookupError('Unknown session: {}'.format(lsid))
-        
+        lsession = self.conn.unmarshal_lsession(ref.get('rsid'))
         return lsession.unmarshal_id(oid)
     
     def unmarshal_id(self, loid):
@@ -314,6 +309,15 @@ class LocalSession(Session):
     
     def close(self):
         self.root().release()
+    
+    def destroy(self):
+        for lobj in self.objects.values():
+            lobj._close()
+        del self.conn.lsessions[self.lsid]
+    
+    def free(self, loid):
+        lobj = self.unmarshal_id(loid)
+        lobj.release()
 
 class NativeFunction:
     
@@ -322,32 +326,31 @@ class NativeFunction:
 
 class NativeSession(LocalSession):
     
-    __slots__ = ('refs',)
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.refs = WeakValueDictionary()
+    __slots__ = ()
     
     def marshal(self, obj, method):
         loid = self.nextloid
         self.nextloid += 1
-        self.refs[loid] = obj
+        self.objects[loid] = obj
         
         return {OBJECT_ID: loid,
                 'lsid': self.lsid,
                 'method': method}
     
     def unmarshal_id(self, loid):
+        obj = super().unmarshal_id(loid)
+        return NativeFunction(obj) if isinstance(obj, FunctionType) else obj
+    
+    def destroy(self):
+        del self.conn.lsessions[self.lsid]
+    
+    def free(self, loid):
         if loid is None:
-            return self.objects[None]  # root
+            return super().free(None)  # root
         
-        obj = self.refs.get(loid)
+        obj = self.objects.pop(loid, None)
         if obj is None:
-            raise LookupError('Unknown object: {} (may have been garbage collected)'.format(loid))
-        
-        if isinstance(obj, FunctionType):
-            return NativeFunction(obj)
-        return obj
+            raise LookupError('Unknown object: {}'.format(loid))
 
 class LocalObjectBase:
     
@@ -458,12 +461,7 @@ class LocalRoot(LocalObjectBase, metaclass=LocalRootType):
         self._nref = 1
     
     def _close(self):
-        # close all objects in session
-        for lobj in self._lsession.objects.values():
-            lobj._close()
-        
-        # remove session
-        del self._lsession.conn.lsessions[self._lsession.lsid]
+        self._lsession.destroy()
 
 class LocalSessionManager(LocalRoot):
     
@@ -472,6 +470,11 @@ class LocalSessionManager(LocalRoot):
     def open(self, lsid, lformat=None):
         """Open a new session."""
         self._lsession.conn.create_local_session(lsid, lformat=lformat)
+    
+    def free(self, lsid, loid):
+        """Release the specified object, which may be a native object."""
+        lsession = self._lsession.conn.unmarshal_lsession(lsid)
+        lsession.free(loid)
 
 class LocalObject(LocalObjectBase):
     
@@ -520,7 +523,7 @@ class RemoteObject:
         self._rsession = rsession
         rsid = rsession.rsid
         self._rref = {OBJECT_ID: roid, 'rsid': rsid}
-        self._closed = (rsid == -1)  # native objects aren't refcounted
+        self._closed = False
     
     def __getattr__(self, name):
         return RemoteMethod(self, name)
@@ -542,7 +545,9 @@ class RemoteObject:
         else:
             self._closed = True
             try:
-                did = self._rsession.call(self, 'release')
+                # calling free instead of release allows native objects to be unreferenced
+                did = self._rsession.call(None, 'free',
+                                          [self._rref['rsid'], self._rref[OBJECT_ID]])
             except DisconnectedError:
                 fut.set_result(None)  # direct connection is already dead
             except Exception as exc:
@@ -672,10 +677,7 @@ class RemoteSessionBase(Session):
         
         if 'rsid' in ref:
             # this is actually a LocalObject (a callback) being passed back to us
-            lsid = ref['rsid']
-            lsession = self.conn.lsessions.get(lsid)
-            if lsession is None:
-                raise LookupError('Unknown session: {}'.format(lsid))
+            lsession = self.conn.unmarshal_lsession(ref['rsid'])
             return lsession.unmarshal_id(oid)
         
         rsid = ref.get('lsid')
@@ -1031,6 +1033,12 @@ class Connection(object):
             del header['dst']  # no further forwarding
             dst.send(header, body)
     
+    def unmarshal_lsession(self, lsid):
+        lsession = self.lsessions.get(lsid)
+        if lsession is None:
+            raise LookupError('Unknown session: {}'.format(lsid))
+        return lsession
+    
     def apply_begin(self, rcodec, srcid, method, msg):
         lref = msg.get('this')
         if lref is None:
@@ -1045,11 +1053,7 @@ class Connection(object):
             else:
                 raise TypeError('Malformed this object')
         
-        lsession = self.lsessions.get(lsid)
-        if lsession is None:
-            raise LookupError('Unknown session: {}'.format(lsid))
-        
-        return lsession, loid
+        return self.unmarshal_lsession(lsid), loid
     
     def apply_finish(self, rcodec, srcid, method, lsession, loid, msg):
         lobj = lsession.unmarshal_id(loid)

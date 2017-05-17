@@ -498,15 +498,12 @@ def test_native_callback_function(rroot):
     """Call a native function remotely."""
     assert 'gone native' == rroot.call(native_function, 'gone')
 
-def test_native_gc(rroot):
-    """Try to access a native object after it has been garbage collected."""
-    rroot.store_cb(NativeObject(0).add)
-    collect()
-    try:
-        rroot.call_cb(0)
-    except LookupError:
-        return
-    assert False
+def test_native_callback_lambda(rroot):
+    """Call an anonymous native function remotely."""
+    x = []
+    rroot.store_cb(lambda y: x.append(y))
+    rroot.call_cb(42)
+    assert [42] == x
 
 def test_bridge(broot):
     """Call a bridged method locally."""
