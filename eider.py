@@ -569,7 +569,10 @@ class RemoteObject:
     
     def __del__(self):
         # this can be executed in a different thread
-        self._rsession.conn.loop.call_soon_threadsafe(self._close)
+        if not self._closed:
+            loop = self._rsession.conn.loop
+            if not loop.is_closed():
+                loop.call_soon_threadsafe(self._close)
     
     def __aiter__(self):
         return RemoteIterator(self)
