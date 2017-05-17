@@ -769,7 +769,7 @@ class Bridge(LocalObject):
 class Registry:
     
     def __init__(self):
-        self.objects = WeakValueDictionary()
+        self.objects = {}
         self.nextid = 0
     
     def add(self, obj):
@@ -782,7 +782,7 @@ class Registry:
         return self.objects.get(id)
     
     def remove(self, id):
-        del self.objects[id]
+        self.objects.pop(id, None)
 
 class Connection(object):
     
@@ -842,6 +842,7 @@ class Connection(object):
         if self.closed:
             return
         self.closed = True
+        self.registry.remove(self.id)
         self.task.cancel()
     
     @coroutine
@@ -1011,8 +1012,7 @@ class Connection(object):
     def bridge_call(self, dstid, cid, header, body):
         dst = self.registry.get(dstid)
         if dst is None:
-            self.on_error(None, cid, DisconnectedError(
-                'Unknown connection: {}'.format(dstid)))
+            self.on_error(None, cid, DisconnectedError('Unknown connection: {}'.format(dstid)))
         else:
             # forward message to intended callee
             del header['dst']  # no further forwarding
