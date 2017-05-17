@@ -320,7 +320,7 @@ class NativeFunction:
     def __init__(self, f):
         self.call = f
 
-class NativeLocalSession(LocalSession):
+class NativeSession(LocalSession):
     
     __slots__ = ('refs',)
     
@@ -808,7 +808,7 @@ class Connection(object):
         self.nextrcid = 0  # next remote call id
         
         LocalSession(self, None, LocalSessionManager)  # root session
-        NativeLocalSession(self, -1, LocalRoot)  # native (non-LocalObject) session
+        NativeSession(self, -1, LocalRoot)  # native (non-LocalObject) session
         
         if registry is None:
             registry = getattr(self._thread_local, 'registry', None)
