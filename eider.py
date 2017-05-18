@@ -34,7 +34,7 @@ from types import FunctionType, MethodType
 from aiohttp import __version__ as aiohttp_version, ClientSession, WSCloseCode, WSMsgType
 from aiohttp.web import Application, run_app, WebSocketResponse
 
-__version__ = '0.9.4'
+__version__ = '0.10.0'
 
 try:
     StopAsyncIteration = builtins.StopAsyncIteration  # added in Python 3.5
