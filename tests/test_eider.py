@@ -220,7 +220,7 @@ def native_function(s):
 def server():
     t = Thread(target=eider.serve,
                args=[PORT, new_event_loop()],
-               kwargs={'root': RemoteAPI},
+               kwargs={'root': RemoteAPI, 'handle_signals': False},
                daemon=True)
     t.start()
 

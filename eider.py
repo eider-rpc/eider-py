@@ -1403,7 +1403,7 @@ def receive(url='ws://localhost:8080/', loop=None, **kwargs):
     conn = Connection(url, loop, **kwargs)
     yield from conn.wait_closed()
 
-def serve(port=8080, loop=None, **kwargs):
+def serve(port=8080, loop=None, handle_signals=True, **kwargs):
     if loop is None:
         loop = get_event_loop()
     
@@ -1427,14 +1427,19 @@ def serve(port=8080, loop=None, **kwargs):
         for conn in conns:
             conn.close()
     
-    aiohttp2 = int(aiohttp_version[0]) >= 2
+    aiohttp_ver = tuple(map(int, aiohttp_version.split('.')))
     
-    app = Application(**({} if aiohttp2 else {'loop': loop}))
+    app = Application(**({} if aiohttp_ver >= (2,) else {'loop': loop}))
     app.router.add_route('GET', '/', handle)
     app.on_shutdown.append(on_shutdown)
     
     busywait = PeriodicCall(lambda: None, 1, loop)  # see comment for BlockingConnection.busywait
     try:
-        run_app(app, port=port, **({'loop': loop} if aiohttp2 else {}))
+        kwargs_run = {}
+        if aiohttp_ver >= (2,):
+            kwargs_run['loop'] = loop
+            if aiohttp_ver >= (2, 2):
+                kwargs_run['handle_signals'] = handle_signals
+        run_app(app, port=port, **kwargs_run)
     finally:
         busywait.cancel()
