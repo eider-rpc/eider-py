@@ -1372,13 +1372,13 @@ class BlockingConnection:
         try:
             self.conn.close()
             self.conn.loop.run_until_complete(self.conn.wait_closed())
-        except CancelledError:
-            # This can happen during garbage collection at process exit.
-            pass
-        except ProtocolError as exc:
-            self.conn.logger.warning(exc.msg)
         except Exception:
-            self.conn.logger.exception('Error while closing connection')
+            # Lots of reasons we could get an exception - the loop could be already closed during
+            # garbage collection, or the connection could have already failed (which is why we're
+            # closing it!).  Any consequential errors should be visible elsewhere to code that was
+            # using the connection.  So we swallow exceptions here to avoid cluttering logs with
+            # redundant error messages.
+            pass
         finally:
             self.busywait.cancel()
     
