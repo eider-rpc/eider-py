@@ -19,8 +19,7 @@
     Unit tests for eider.
 """
 
-from asyncio import (CancelledError, coroutine, get_event_loop, Future, new_event_loop,
-                     sleep, TimeoutError, wait_for)
+from asyncio import CancelledError, coroutine, get_event_loop, Future, new_event_loop, sleep
 from functools import reduce
 from gc import collect
 from inspect import signature
@@ -308,13 +307,13 @@ def test_cancel(rroot_async):
     """Cancel a remote method call."""
     loop = get_event_loop()
     fut = rroot_async.cancellable()
+    loop.call_soon(fut.cancel)
     try:
-        loop.run_until_complete(wait_for(fut, 0.01))
-    except TimeoutError:
+        loop.run_until_complete(fut)
+    except CancelledError:
         pass
     else:
         assert False
-    assert fut.cancelled()
     assert loop.run_until_complete(rroot_async.cancelled())
 
 def test_call_codec(rroot_codec):
