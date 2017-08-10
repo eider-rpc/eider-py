@@ -169,16 +169,13 @@ class RemoteAPI(API):
 
     def sum(self, *args):
         return sum(args)
-
-    @coroutine
+    
     def cancellable(self):
-        try:
-            yield from Future(loop=self._lsession.conn.loop)
-        except CancelledError:
-            self._cancelled.set_result(True)
-            raise
-        else:
-            self._cancelled.set_result(False)
+        def on_done(fut):
+            self._cancelled.set_result(fut.cancelled())
+        fut = Future(loop=self._lsession.conn.loop)
+        fut.add_done_callback(on_done)
+        return fut
     
     @coroutine
     def cancelled(self):
