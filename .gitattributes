@@ -1,0 +1,2 @@
+# Make sure line endings are properly converted whether or not core.autocrlf is true
+*       text=auto
