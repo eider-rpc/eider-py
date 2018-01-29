@@ -182,8 +182,8 @@ class RemoteAPI(API):
         return (yield from self._cancelled)
     
     @coroutine
-    def map(self, f: 'Callable', xs: list, async=True) -> list:
-        return [(yield from f(x)) for x in xs] if async else list(map(f, xs))
+    def map(self, f: 'Callable', xs: list, async_=True) -> list:
+        return [(yield from f(x)) for x in xs] if async_ else list(map(f, xs))
     
     def getattr(self, obj, attr):
         with obj as o:
@@ -425,13 +425,13 @@ def test_signature(rroot):
     """Get type signature for a remote method."""
     sig = rroot.map.signature()
     assert {
-            'defaults': {'async': True},
-            'params': [['f', 'Callable'], ['xs', 'list'], ['async', None]],
+            'defaults': {'async_': True},
+            'params': [['f', 'Callable'], ['xs', 'list'], ['async_', None]],
             'return': 'list'
         } == sig
     
     # test unmarshal_signature as well
-    def g(f: 'Callable', xs: list, async=True) -> list:
+    def g(f: 'Callable', xs: list, async_=True) -> list:
         pass
     assert signature(g) == eider.unmarshal_signature(sig)
 
