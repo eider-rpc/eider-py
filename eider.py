@@ -19,7 +19,8 @@
     The Eider RPC protocol.
 """
 
-from asyncio import CancelledError, coroutine, Future, get_event_loop, iscoroutine, set_event_loop
+from asyncio import (
+    CancelledError, coroutine, Future, get_event_loop, iscoroutine, Queue, set_event_loop)
 import builtins
 from collections import defaultdict
 from functools import partial
@@ -827,7 +828,7 @@ class Connection(object):
         self.id = registry.add(self)
         
         self.ws = None
-        self.messages = []
+        self.sendq = Queue(loop=self.loop)
         self.opened = Future(loop=self.loop)
         self.task = self.loop.create_task(self.receive(whither))
         self.closed = False
@@ -871,6 +872,7 @@ class Connection(object):
     def receive(self, whither):
         http_session = None
         close_code = WSCloseCode.OK
+        send_task = None
         try:
             if isinstance(whither, str):
                 http_session = ClientSession(loop=self.loop)
@@ -880,11 +882,7 @@ class Connection(object):
             
             self.opened.set_result(True)
             
-            for header, body in self.messages:
-                self.senddata(header)
-                if body is not None:
-                    self.senddata(body)
-            self.messages = []
+            send_task = self.loop.create_task(self.send_forever())
             
             header = None
             while 1:
@@ -938,6 +936,12 @@ class Connection(object):
             self.closed = True
             self.lclose()
             self.rclose()
+            if send_task is not None:
+                send_task.cancel()
+                try:
+                    yield from send_task
+                except Exception as exc:
+                    self.logger.error('{}: {}'.format(type(exc).__name__, exc), exc_info=True)
             if self.ws is not None:
                 yield from self.ws.close(code=close_code)
             if http_session is not None:
@@ -1230,20 +1234,26 @@ class Connection(object):
     
     def send(self, header, body=None):
         if not self.closed:
-            header = self.lencode(self, header)
-            if self.ws is None:
-                self.messages.append((header, body))
-                return
-            
-            self.senddata(header)
+            self.sendq.put_nowait(self.lencode(self, header))
             if body is not None:
-                self.senddata(body)
+                self.sendq.put_nowait(body)
     
-    def senddata(self, data):
-        if isinstance(data, str):
-            self.ws.send_str(data)
-        else:
-            self.ws.send_bytes(data)
+    @coroutine
+    def send_forever(self):
+        try:
+            while 1:
+                data = yield from self.sendq.get()
+                try:
+                    if isinstance(data, str):
+                        yield from self.ws.send_str(data)
+                    else:
+                        yield from self.ws.send_bytes(data)
+                except CancelledError:
+                    raise
+                except Exception as exc:
+                    self.logger.error('{}: {}'.format(type(exc).__name__, exc), exc_info=True)
+        except CancelledError:
+            pass
 
 class PeriodicCall:
     """Call a function periodically in an event loop.  This is preferable to using a Task because
