@@ -29,6 +29,6 @@ setup(
         'Topic :: System :: Distributed Computing'
     ],
     py_modules=['eider'],
-    install_requires=['aiohttp>=1.0.0'],
+    install_requires=['aiohttp>=1,<3'],
     zip_safe=False
 )
