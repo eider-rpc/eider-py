@@ -19,7 +19,7 @@
     The Eider RPC protocol.
 """
 
-from asyncio import CancelledError, coroutine, Future, get_event_loop, iscoroutine
+from asyncio import CancelledError, coroutine, Future, get_event_loop, iscoroutine, set_event_loop
 import builtins
 from collections import defaultdict
 from functools import partial
@@ -1419,6 +1419,7 @@ def receive(url='ws://localhost:8080/', loop=None, **kwargs):
 def serve(port=8080, loop=None, handle_signals=True, **kwargs):
     if loop is None:
         loop = get_event_loop()
+    set_event_loop(loop)
     
     conns = []
     
@@ -1450,7 +1451,8 @@ def serve(port=8080, loop=None, handle_signals=True, **kwargs):
     try:
         kwargs_run = {}
         if aiohttp_ver >= (2,):
-            kwargs_run['loop'] = loop
+            if aiohttp_ver < (3,):
+                kwargs_run['loop'] = loop
             if aiohttp_ver >= (2, 2):
                 kwargs_run['handle_signals'] = handle_signals
         run_app(app, port=port, **kwargs_run)
