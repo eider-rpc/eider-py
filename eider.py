@@ -945,7 +945,7 @@ class Connection(object):
             if self.ws is not None:
                 yield from self.ws.close(code=close_code)
             if http_session is not None:
-                http_session.close()
+                yield from http_session.close()
     
     def dispatch(self, rcodec, header, body=None):
         dstid = header.get('dst')
