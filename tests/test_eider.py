@@ -148,6 +148,9 @@ class API(eider.LocalRoot):
     
     def passthru(self, x):
         return x
+    
+    def native(self, x):
+        return NativeObject(x)
 
 class LocalAPI(API):
     
@@ -208,6 +211,9 @@ class NativeObject:
     
     def add(self, x):
         self.x += x
+    
+    def get(self):
+        return self.x
 
 def native_function(s):
     return s + ' native'
@@ -478,11 +484,17 @@ def test_lobject(lroot, rroot):
         rval.add(lval)
         assert 7 == rval.val()
 
-def test_native_marshal(rroot):
-    """Pass a native object to a remote call."""
+def test_native_lmarshal(rroot):
+    """Pass a local native object to a remote call."""
     n = NativeObject(42)
     assert n is rroot.passthru(n)
     assert native_function is rroot.passthru(native_function)
+
+def test_native_rmarshal(rroot):
+    """Return a remote native object from a remote call."""
+    rn = rroot.native(99)
+    rn.add(1)
+    assert 100 == rn.get()
 
 def test_native_callback(rroot):
     """Call a native method remotely."""

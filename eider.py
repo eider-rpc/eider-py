@@ -681,13 +681,18 @@ class RemoteSessionBase(Session):
             return lsession.unmarshal_id(oid)
         
         rsid = ref.get('lsid')
-        if rsid != self.rsid:
-            raise LookupError('Unknown session: {}'.format(rsid))
+        if rsid == self.rsid:
+            rsession = self
+        else:
+            # this is actually a reference to an object in another session (or a native object)
+            # don't use a real RemoteSession, because we don't manage its lifetime
+            rsession = self.ExternalSession(self.conn, rsid, None, self.dstid)
+            rsession.lcodec = self.lcodec
         
-        robj = self.unmarshal_id(oid)
+        robj = rsession.unmarshal_id(oid)
         
         if 'bridge' in ref:
-            return self.unmarshal_bridge(robj, ref['bridge'])
+            return rsession.unmarshal_bridge(robj, ref['bridge'])
         
         return robj
     
@@ -696,6 +701,8 @@ class RemoteSessionBase(Session):
     
     def unmarshal_id(self, roid):
         return RemoteObject(self, roid)
+
+RemoteSessionBase.ExternalSession = RemoteSessionBase
 
 class RemoteSessionManaged(RemoteSessionBase):
     
@@ -1342,9 +1349,15 @@ class BlockingSessionMixin:
     def unmarshal_id(self, roid):
         return BlockingObject(self, roid)
 
+class BlockingExternalSession(BlockingSessionMixin, RemoteSessionBase):
+    
+    __slots__ = ()
+
 class BlockingSession(BlockingSessionMixin, RemoteSession):
     
     __slots__ = ()
+    
+    ExternalSession = BlockingExternalSession
     
     def _open(self, rformat):
         # Efficiency is less of a concern here than in the asynchronous RemoteSession, so we raise
