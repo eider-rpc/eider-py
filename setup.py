@@ -13,7 +13,9 @@ with open('eider.py') as fin:
 setup(
     name='eider',
     version=__version__,
-    description='An object-oriented, asynchronous, late-binding, web-first, polyglot RPC protocol',
+    description=(
+        'An object-oriented, asynchronous, late-binding, web-first, polyglot '
+        'RPC protocol'),
     url='https://github.com/eider-rpc/eider-py',
     author='Bart Robinson',
     author_email='bart@bartrobinson.com',
