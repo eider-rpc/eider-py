@@ -593,37 +593,40 @@ class RemoteObject:
         # already dead.
         fut = Future(loop=self._rsession.conn.loop)
         if self._closed:
-            fut.set_result(None)  # object is already closed
-        else:
+            # object is already closed
+            fut.set_result(None)
+            return fut
+
+        if self._rsession.closed() or self._rsession.conn.closed:
+            # session is already closed, or direct connection is already dead
             self._closed = True
-            try:
-                # calling free instead of release allows native objects to be
-                # unreferenced
-                did = self._rsession.call(
-                    None, 'free', [self._rref['rsid'], self._rref[OBJECT_ID]])
-            except DisconnectedError:
-                # direct connection is already dead
-                fut.set_result(None)
-            except Exception as exc:
-                # unexpected
-                fut.set_exception(exc)
-            else:
-                def done(did):
-                    try:
-                        did.result()
-                    except (
-                            # connection (direct or bridged) is now dead
-                            DisconnectedError,
-                            # session is already closed
-                            LookupError):
-                        fut.set_result(None)
-                    except Exception as exc:
-                        # unexpected
-                        fut.set_exception(exc)
-                    else:
-                        # object successfully released
-                        fut.set_result(None)
-                did.add_done_callback(done)
+            fut.set_result(None)
+            return fut
+
+        self._closed = True
+        try:
+            # calling free instead of release allows native objects to be
+            # unreferenced
+            did = self._rsession.call(
+                None, 'free', [self._rref['rsid'], self._rref[OBJECT_ID]])
+        except Exception as exc:
+            # unexpected
+            fut.set_exception(exc)
+        else:
+            def done(did):
+                try:
+                    did.result()
+                except (LookupError, DisconnectedError):
+                    # session is now closed, or connection (direct or bridged)
+                    # is now dead
+                    fut.set_result(None)
+                except Exception as exc:
+                    # unexpected
+                    fut.set_exception(exc)
+                else:
+                    # object successfully released
+                    fut.set_result(None)
+            did.add_done_callback(done)
         return fut
 
     def __enter__(self):
@@ -768,6 +771,9 @@ class RemoteSessionBase(Session):
     def unmarshal_id(self, roid):
         return RemoteObject(self, roid)
 
+    def closed(self):
+        return False
+
 
 RemoteSessionBase.ExternalSession = RemoteSessionBase
 
@@ -797,6 +803,9 @@ class RemoteSessionManaged(RemoteSessionBase):
 
     def root(self):
         return self._root
+
+    def closed(self):
+        return self._root._closed
 
 
 class RemoteSession(RemoteSessionManaged):
@@ -832,6 +841,9 @@ class BridgedSession(RemoteSessionManaged):
 
     def close(self):
         return self.bridge._close()
+
+    def closed(self):
+        return self.bridge._closed
 
 
 class Bridge(LocalObject):
