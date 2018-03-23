@@ -23,13 +23,14 @@
 from asyncio import (
     CancelledError, coroutine, Future, get_event_loop, iscoroutine, Queue,
     set_event_loop)
+from base64 import b64encode
 import builtins
 from collections import defaultdict
 from functools import partial
 from inspect import getdoc, Parameter, signature, Signature
 from io import StringIO
 from json import dumps, loads as decode
-from logging import getLogger
+from logging import DEBUG, getLogger
 from threading import local
 from traceback import print_exception
 from types import FunctionType, MethodType
@@ -969,6 +970,7 @@ class Connection:
                 tp, data, extra = yield from self.ws.receive()
 
                 if tp in (WSMsgType.TEXT, WSMsgType.BINARY):
+                    self.log_data('recv', data)
                     if header is None:
                         rcodec = (self.rcodec if tp == WSMsgType.TEXT else
                                   self.rcodec_bin)
@@ -1340,6 +1342,7 @@ class Connection:
         try:
             while 1:
                 data = yield from self.sendq.get()
+                self.log_data('send', data)
                 try:
                     if isinstance(data, str):
                         yield from self.ws.send_str(data)
@@ -1352,6 +1355,19 @@ class Connection:
                                       exc_info=True)
         except CancelledError:
             pass
+
+    def log_data(self, tag, data):
+        logger = self.logger
+        if logger.isEnabledFor(DEBUG):
+            if isinstance(data, str):
+                t = 'str'
+                n = len(data.encode())
+                s = data
+            else:
+                t = 'bin'
+                n = len(data)
+                s = b64encode(data).decode()
+            logger.debug('{} {} {:3} {}'.format(tag, t, n, s[:512]))
 
 
 class PeriodicCall:
