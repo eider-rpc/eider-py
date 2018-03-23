@@ -873,7 +873,7 @@ class Registry:
         self.objects.pop(id, None)
 
 
-class Connection(object):
+class Connection:
 
     _thread_local = local()
 
