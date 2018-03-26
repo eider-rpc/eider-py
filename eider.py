@@ -364,14 +364,15 @@ class NativeSession(LocalSession):
 
     __slots__ = ()
 
-    def marshal(self, obj, method):
+    def marshal(self, obj, method=None):
         loid = self.nextloid
         self.nextloid += 1
         self.objects[loid] = obj
 
-        return {OBJECT_ID: loid,
-                'lsid': self.lsid,
-                'method': method}
+        lref = {OBJECT_ID: loid, 'lsid': self.lsid}
+        if method is not None:
+            lref['method'] = method
+        return lref
 
     def unmarshal_id(self, loid):
         obj = super().unmarshal_id(loid)
