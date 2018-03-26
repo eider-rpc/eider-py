@@ -715,8 +715,11 @@ class RemoteCall(Future):
         if conn.rcalls.pop(rcid, None) is None:
             return False
 
-        conn.send({'dst': rsession.dstid,
-                   'cancel': rcid})
+        msg = {'cancel': rcid}
+        dstid = rsession.dstid
+        if dstid is not None:
+            msg['dst'] = dstid
+        conn.send(msg)
         return super().cancel()
 
 
@@ -1294,9 +1297,9 @@ class Connection:
         if self.closed:
             raise DisconnectedError('Connection closed')
 
-        header = {'dst': dstid,
-                  'id': rcid,
-                  'method': method}
+        header = {'id': rcid, 'method': method}
+        if dstid is not None:
+            header['dst'] = dstid
         if lcodec is None:
             body = None
             header['this'] = robj
@@ -1309,7 +1312,9 @@ class Connection:
         self.send(header, body)
 
     def respond(self, srcid, lcid, result, lcodec):
-        header = {'dst': srcid, 'id': lcid}
+        header = {'id': lcid}
+        if srcid is not None:
+            header['dst'] = srcid
         if lcodec is None:
             body = None
             header['result'] = result
@@ -1323,7 +1328,9 @@ class Connection:
         self.send(header, body)
 
     def error(self, srcid, lcid, exc, lcodec=None):
-        header = {'dst': srcid, 'id': lcid}
+        header = {'id': lcid}
+        if srcid is not None:
+            header['dst'] = srcid
         tb = StringIO()
         etype = type(exc)
         print_exception(etype, exc, exc.__traceback__, file=tb)
