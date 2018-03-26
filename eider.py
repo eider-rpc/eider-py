@@ -1302,12 +1302,14 @@ class Connection:
             header['dst'] = dstid
         if lcodec is None:
             body = None
-            header['this'] = robj
+            if robj is not None:
+                header['this'] = robj
             header['params'] = params
         else:
-            body = lcodec.encode(self,
-                                 {'this': robj,
-                                  'params': params})
+            body = {'params': params}
+            if robj is not None:
+                body['this'] = robj
+            body = lcodec.encode(self, body)
             header['format'] = lcodec.name
         self.send(header, body)
 
