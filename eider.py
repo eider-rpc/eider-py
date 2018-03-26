@@ -1304,11 +1304,14 @@ class Connection:
             body = None
             if robj is not None:
                 header['this'] = robj
-            header['params'] = params
+            if params:
+                header['params'] = params
         else:
-            body = {'params': params}
+            body = {}
             if robj is not None:
                 body['this'] = robj
+            if params:
+                body['params'] = params
             body = lcodec.encode(self, body)
             header['format'] = lcodec.name
         self.send(header, body)
