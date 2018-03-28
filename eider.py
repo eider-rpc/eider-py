@@ -1547,8 +1547,19 @@ class BlockingConnection:
 
     def close(self):
         try:
+            # Bail out as quickly as possible if we're already closed.
+            if self.conn.closed:
+                return
+
             self.conn.close()
-            self.conn.loop.run_until_complete(self.conn.wait_closed())
+
+            # We could be currently inside an event loop, if this object was
+            # abandoned and is now being garbage-collected.  If so, we don't
+            # want to reentrantly run the loop, because that would cause
+            # problems for the outer loop.  But if not, we want to wait for the
+            # connection to properly close.
+            if not self.conn.loop.is_running():
+                self.conn.loop.run_until_complete(self.conn.wait_closed())
         except Exception:
             # Lots of reasons we could get an exception - the loop could be
             # already closed during garbage collection, or the connection could
