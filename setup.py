@@ -10,12 +10,16 @@ with open('eider.py') as fin:
             exec(line)
             break
 
+with open('README.rst') as fin:
+    readme = fin.read()
+
 setup(
     name='eider',
     version=__version__,
     description=(
         'An object-oriented, asynchronous, late-binding, web-first, polyglot '
         'RPC protocol'),
+    long_description=readme,
     url='https://github.com/eider-rpc/eider-py',
     author='Bart Robinson',
     author_email='bart@bartrobinson.com',
