@@ -366,6 +366,23 @@ def test_prop(rroot):
     assert 4 == rval.val()
 
 
+def test_prop_auto(rroot):
+    """Create a new remote property."""
+    rval = rroot.new_Value(3)
+    rval.extra = 5
+    assert 5 == rval.extra()
+
+
+def test_prop_auto_forbidden(rroot):
+    """Assign to a forbidden remote property."""
+    rval = rroot.new_Value(4)
+    try:
+        rval.release = 6
+    except AttributeError:
+        return
+    assert False
+
+
 def test_error_notfound(rroot):
     """Call a nonexistent remote method."""
     try:

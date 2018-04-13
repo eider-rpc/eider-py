@@ -1178,9 +1178,35 @@ class Connection:
 
     def apply_finish(self, rcodec, srcid, method, lsession, loid, msg):
         lobj = lsession.unmarshal_id(loid)
-        f = getattr(lobj, method)
         params = lsession.unmarshal_all(rcodec, msg.get('params', []), srcid)
-        return f(*params)
+
+        try:
+            a = getattr(lobj, method)
+        except AttributeError:
+            if method[:4] == 'set_' and len(params) == 1:
+                # direct property assignment
+                name = method[4:]
+                if name[:1] == '_':
+                    raise AttributeError(
+                        "Cannot assign to private attribute '{}'".format(name))
+                try:
+                    a = getattr(lobj, name)
+                except AttributeError:
+                    pass
+                else:
+                    if callable(a):
+                        raise AttributeError(
+                            "Cannot assign to method '{}'".format(name))
+                setattr(lobj, name, params[0])
+                return
+            raise
+
+        if not callable(a) and not params:
+            # direct property access
+            return a
+
+        # method call
+        return a(*params)
 
     def getresult(self, rcodec, rsession, msg):
         if 'result' in msg:
