@@ -35,9 +35,48 @@ from threading import local
 from traceback import print_exception
 from types import FunctionType, MethodType
 
-from aiohttp import (
-    __version__ as aiohttp_version, ClientSession, WSCloseCode, WSMsgType)
-from aiohttp.web import Application, run_app, WebSocketResponse
+
+try:
+    import aiohttp
+    from aiohttp import (
+        __version__ as aiohttp_version, ClientSession, WSCloseCode, WSMsgType)
+    from aiohttp.web import Application, run_app, WebSocketResponse
+except ImportError:
+    aiohttp = None
+
+    from enum import IntEnum
+
+    class WSCloseCode(IntEnum):
+        OK = 1000
+        GOING_AWAY = 1001
+        UNSUPPORTED_DATA = 1003
+        POLICY_VIOLATION = 1008
+        INTERNAL_ERROR = 1011
+
+    class WSMsgType(IntEnum):
+        TEXT = 0x1
+        BINARY = 0x2
+        CLOSE = 0x8
+        CLOSED = 0x101
+        ERROR = 0x102
+
+
+try:
+    import websockets
+    from websockets import (
+        connect as ws_connect, ConnectionClosed, serve as ws_serve,
+        WebSocketCommonProtocol)
+except ImportError:
+    websockets = None
+
+    class ConnectionClosed(Exception):
+        pass
+
+    class WebSocketCommonProtocol:
+        pass
+
+
+WS_LIB_DEFAULT = 'aiohttp' if aiohttp else 'websockets' if websockets else None
 
 
 __version__ = '0.11.0'
@@ -896,13 +935,14 @@ class Connection:
 
     def __init__(self, whither, loop=None, *, root=LocalRoot,
                  lformat='json', rformat='json', rformat_bin='msgpack',
-                 logger=None, registry=None):
+                 logger=None, registry=None, ws_lib=WS_LIB_DEFAULT):
         self.root_factory = root
         self.loop = loop or get_event_loop()
         self.logger = logger or getLogger('eider')
         self.lencode = Codec.registry[lformat].encode
         self.rcodec = Codec.registry[rformat]
         self.rcodec_bin = Codec.registry.get(rformat_bin)
+        self.ws_lib = ws_lib
 
         # connection state
         self.lsessions = {}  # local sessions
@@ -972,10 +1012,20 @@ class Connection:
         send_task = None
         try:
             if isinstance(whither, str):
-                http_session = ClientSession(loop=self.loop)
-                self.ws = yield from http_session.ws_connect(whither)
+                if self.ws_lib == 'websockets':
+                    self.ws = yield from ws_connect(whither, loop=self.loop)
+                else:
+                    http_session = ClientSession(loop=self.loop)
+                    self.ws = yield from http_session.ws_connect(whither)
             else:
                 self.ws = whither
+
+            if isinstance(self.ws, WebSocketCommonProtocol):
+                self.ws_send = self.ws.send
+                ws_recv = self.ws_recv_websockets
+            else:
+                self.ws_send = self.ws_send_aiohttp
+                ws_recv = self.ws_recv_aiohttp
 
             self.opened.set_result(True)
 
@@ -983,7 +1033,7 @@ class Connection:
 
             header = None
             while 1:
-                tp, data, extra = yield from self.ws.receive()
+                tp, data = yield from ws_recv()
 
                 if tp in (WSMsgType.TEXT, WSMsgType.BINARY):
                     self.log_data('recv', data)
@@ -1030,6 +1080,8 @@ class Connection:
                 raise
         except ProtocolError:
             raise
+        except ConnectionClosed:
+            pass
         except Exception:
             close_code = WSCloseCode.INTERNAL_ERROR
             raise
@@ -1395,10 +1447,7 @@ class Connection:
                 data = yield from self.sendq.get()
                 self.log_data('send', data)
                 try:
-                    if isinstance(data, str):
-                        yield from self.ws.send_str(data)
-                    else:
-                        yield from self.ws.send_bytes(data)
+                    yield from self.ws_send(data)
                 except CancelledError:
                     raise
                 except Exception as exc:
@@ -1406,6 +1455,27 @@ class Connection:
                                       exc_info=True)
         except CancelledError:
             pass
+
+    @coroutine
+    def ws_send_aiohttp(self, data):
+        if isinstance(data, str):
+            yield from self.ws.send_str(data)
+        else:
+            yield from self.ws.send_bytes(data)
+
+    @coroutine
+    def ws_recv_aiohttp(self):
+        tp, data, extra = yield from self.ws.receive()
+        return tp, data
+
+    @coroutine
+    def ws_recv_websockets(self):
+        data = yield from self.ws.recv()
+        if isinstance(data, str):
+            tp = WSMsgType.TEXT
+        else:
+            tp = WSMsgType.BINARY
+        return tp, data
 
     def log_data(self, tag, data):
         logger = self.logger
@@ -1621,7 +1691,7 @@ def receive(url='ws://localhost:8080/', loop=None, **kwargs):
     yield from conn.wait_closed()
 
 
-def serve(port=8080, loop=None, handle_signals=True, **kwargs):
+def serve_aiohttp(port=8080, loop=None, handle_signals=True, **kwargs):
     if loop is None:
         loop = get_event_loop()
     set_event_loop(loop)
@@ -1664,3 +1734,32 @@ def serve(port=8080, loop=None, handle_signals=True, **kwargs):
         run_app(app, port=port, **kwargs_run)
     finally:
         busywait.cancel()
+
+
+def serve_websockets(port=8080, loop=None, handle_signals=True, **kwargs):
+    if loop is None:
+        loop = get_event_loop()
+    set_event_loop(loop)
+
+    @coroutine
+    def handle(ws, path):
+        conn = Connection(ws, loop, **kwargs)
+        yield from conn.wait_closed()
+
+    # see comment for BlockingConnection.busywait
+    busywait = PeriodicCall(lambda: None, 1, loop)
+    try:
+        server = loop.run_until_complete(ws_serve(handle, 'localhost', port))
+        try:
+            loop.run_forever()
+        finally:
+            server.close()
+            loop.run_until_complete(server.wait_closed())
+    finally:
+        busywait.cancel()
+
+
+def serve(port=8080, loop=None, handle_signals=True, ws_lib=WS_LIB_DEFAULT,
+          **kwargs):
+    serve = serve_websockets if ws_lib == 'websockets' else serve_aiohttp
+    serve(port, loop, handle_signals, **kwargs)

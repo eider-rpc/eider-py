@@ -27,6 +27,7 @@ from gc import collect
 from inspect import signature
 from numbers import Number
 from operator import mul
+from os import environ
 from sys import version_info
 from threading import Thread
 
@@ -37,6 +38,7 @@ import eider
 
 PORT = 12345
 URL = 'ws://localhost:{}/'.format(PORT)
+WS_LIB = environ.get('EIDER_WS_LIB', 'aiohttp')
 
 
 if version_info >= (3, 6):
@@ -237,20 +239,22 @@ def native_function(s):
 def server():
     t = Thread(target=eider.serve,
                args=[PORT, new_event_loop()],
-               kwargs={'root': RemoteAPI, 'handle_signals': False},
+               kwargs={'root': RemoteAPI,
+                       'handle_signals': False,
+                       'ws_lib': WS_LIB},
                daemon=True)
     t.start()
 
 
 @pytest.yield_fixture(scope='module')
 def conn(server):
-    with eider.BlockingConnection(URL, root=LocalAPI) as conn:
+    with eider.BlockingConnection(URL, root=LocalAPI, ws_lib=WS_LIB) as conn:
         yield conn
 
 
 @pytest.yield_fixture(scope='module')
 def conn_async(server):
-    conn = eider.Connection(URL, root=LocalAPI)
+    conn = eider.Connection(URL, root=LocalAPI, ws_lib=WS_LIB)
     try:
         yield conn
     finally:
@@ -290,7 +294,8 @@ def rroot_msgpack(conn):
 
 @pytest.yield_fixture(scope='module')
 def conn_msgpack(server):
-    with eider.BlockingConnection(URL, lformat='msgpack') as conn:
+    with eider.BlockingConnection(
+            URL, lformat='msgpack', ws_lib=WS_LIB) as conn:
         yield conn
 
 
@@ -305,7 +310,7 @@ def target(server):
     def run():
         @coroutine
         def receive():
-            conn = eider.Connection(URL, loop, root=TargetAPI)
+            conn = eider.Connection(URL, loop, root=TargetAPI, ws_lib=WS_LIB)
             with conn.create_session() as rroot:
                 yield from rroot.set_target()
             yield from conn.wait_closed()
