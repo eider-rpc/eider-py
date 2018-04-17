@@ -427,12 +427,15 @@ def test_gc(rroot):
     assert n + 1 == rroot.num_objects()
     del rval
 
-    # make sure RemoteObject._close() (triggered by RemoteObject.__del__)
-    # completes
-    collect()
-    get_event_loop().run_until_complete(sleep(0.1))
-
-    assert n == rroot.num_objects()
+    # Make sure RemoteObject._close() (triggered by RemoteObject.__del__)
+    # completes.  This may take several calls to gc.collect() on PyPy.
+    for _ in range(10):
+        collect()
+        get_event_loop().run_until_complete(sleep(0.1))
+        if n == rroot.num_objects():
+            break
+    else:
+        assert False
 
 
 def test_with(rroot):

@@ -4,6 +4,7 @@ python:
     - 3.5
     - 3.6
     - 3.7-dev
+    - pypy3.5
 env:
     - EIDER_WS_LIB=aiohttp
     - EIDER_WS_LIB=websockets
