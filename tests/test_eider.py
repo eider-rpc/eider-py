@@ -200,7 +200,13 @@ class RemoteAPI(API):
 
     @coroutine
     def map(self, f: 'Callable', xs: list, async_=True) -> list:
-        return [(yield from f(x)) for x in xs] if async_ else list(map(f, xs))
+        if async_:
+            ys = []
+            for x in xs:
+                ys.append((yield from f(x)))
+            return ys
+        else:
+            return list(map(f, xs))
 
     def getattr(self, obj, attr):
         with obj as o:
