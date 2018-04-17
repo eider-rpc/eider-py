@@ -30,6 +30,7 @@ from operator import mul
 from os import environ
 from sys import version_info
 from threading import Thread
+from time import sleep as time_sleep
 
 import pytest
 
@@ -244,6 +245,10 @@ def server():
                        'ws_lib': WS_LIB},
                daemon=True)
     t.start()
+
+    # wait a bit to make sure the server is established (websockets is slower
+    # than aiohttp)
+    time_sleep(0.1)
 
 
 @pytest.yield_fixture(scope='module')
