@@ -4,10 +4,17 @@ python:
     - 3.5
     - 3.6
     - 3.7-dev
+env:
+    - EIDER_WS_LIB=aiohttp
+    - EIDER_WS_LIB=websockets
+matrix:
+    exclude:
+        # websockets 4.0.1 has a SyntaxError under python 3.7
+        - python: 3.7-dev
+          env: EIDER_WS_LIB=websockets
 install:
     - pip install .
     - pip install -r requirements-dev.txt
 script:
-    - EIDER_WS_LIB=aiohttp py.test
-    - EIDER_WS_LIB=websockets py.test
+    - py.test
     - flake8
