@@ -34,7 +34,9 @@ from time import sleep as time_sleep
 
 from pytest import fixture, yield_fixture
 
-import eider
+from eider import (
+    async_for, Bridge, BlockingConnection, Connection, LocalObject, LocalRoot,
+    OBJECT_ID, RemoteError, serve, unmarshal_signature)
 
 
 PORT = 12345
@@ -65,11 +67,11 @@ else:
     def aiter2list(it):
         them = yield from it
         xs = []
-        yield from eider.async_for(them, coroutine(xs.append))
+        yield from async_for(them, coroutine(xs.append))
         return xs
 
 
-class Value(eider.LocalObject):
+class Value(LocalObject):
     """Represents a numeric value."""
 
     def __init__(self, lsession, x):
@@ -114,7 +116,7 @@ def get_value(x):
             return (yield from x)  # remote Value
 
 
-class Range(eider.LocalObject):
+class Range(LocalObject):
 
     def __init__(self, lsession, start, stop):
         super().__init__(lsession)
@@ -132,7 +134,7 @@ class Range(eider.LocalObject):
         return {'value': i}
 
 
-class Sequence(eider.LocalObject):
+class Sequence(LocalObject):
 
     def __init__(self, lsession, seq):
         super().__init__(lsession)
@@ -142,7 +144,7 @@ class Sequence(eider.LocalObject):
         return self._seq[i]
 
 
-class API(eider.LocalRoot):
+class API(LocalRoot):
 
     _newables = [Value, Range, Sequence]
 
@@ -217,7 +219,7 @@ class RemoteAPI(API):
 
     @coroutine
     def bridge(self):
-        return eider.Bridge(self._lsession, (yield from RemoteAPI.target))
+        return Bridge(self._lsession, (yield from RemoteAPI.target))
 
 
 class TargetAPI(API):
@@ -244,7 +246,7 @@ def native_function(s):
 
 @fixture(scope='module')
 def server():
-    t = Thread(target=eider.serve,
+    t = Thread(target=serve,
                args=[PORT, new_event_loop()],
                kwargs={'root': RemoteAPI,
                        'handle_signals': False,
@@ -259,13 +261,13 @@ def server():
 
 @yield_fixture(scope='module')
 def conn(server):
-    with eider.BlockingConnection(URL, root=LocalAPI, ws_lib=WS_LIB) as conn:
+    with BlockingConnection(URL, root=LocalAPI, ws_lib=WS_LIB) as conn:
         yield conn
 
 
 @yield_fixture(scope='module')
 def conn_async(server):
-    conn = eider.Connection(URL, root=LocalAPI, ws_lib=WS_LIB)
+    conn = Connection(URL, root=LocalAPI, ws_lib=WS_LIB)
     try:
         yield conn
     finally:
@@ -305,7 +307,7 @@ def rroot_msgpack(conn):
 
 @yield_fixture(scope='module')
 def conn_msgpack(server):
-    with eider.BlockingConnection(
+    with BlockingConnection(
             URL, lformat='msgpack', ws_lib=WS_LIB) as conn:
         yield conn
 
@@ -321,7 +323,7 @@ def target(server):
     def run():
         @coroutine
         def receive():
-            conn = eider.Connection(URL, loop, root=TargetAPI, ws_lib=WS_LIB)
+            conn = Connection(URL, loop, root=TargetAPI, ws_lib=WS_LIB)
             with conn.create_session() as rroot:
                 yield from rroot.set_target()
             yield from conn.wait_closed()
@@ -413,7 +415,7 @@ def test_error_runtime(rroot):
     try:
         rroot.new_Value(42).divide(0)
     except ZeroDivisionError as exc:
-        assert isinstance(exc.__cause__, eider.RemoteError)
+        assert isinstance(exc.__cause__, RemoteError)
         return
     assert False
 
@@ -523,7 +525,7 @@ def test_signature(rroot):
     # test unmarshal_signature as well
     def g(f: 'Callable', xs: list, async_=True) -> list:
         pass
-    assert signature(g) == eider.unmarshal_signature(sig)
+    assert signature(g) == unmarshal_signature(sig)
 
 
 def test_callback_async(lroot, rroot):
@@ -676,5 +678,5 @@ def test_marshal_outofband(rroot_msgpack):
 def test_pass_oid(rroot_msgpack):
     """Pass dict with special "__*__" key (only works with out-of-band
     codecs)."""
-    obj = {eider.OBJECT_ID: 42, "rsid": 99}
+    obj = {OBJECT_ID: 42, "rsid": 99}
     assert obj == rroot_msgpack.passthru(obj)
