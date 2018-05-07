@@ -8,3 +8,6 @@ pytest
 
 # websockets 4.0.1 has a SyntaxError under python 3.7
 websockets>=4;python_version<"3.7"
+
+# yarl 1.2 drops Python 3.4 support
+yarl>=1.1,<1.2
