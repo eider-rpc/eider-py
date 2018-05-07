@@ -32,7 +32,7 @@ from sys import version_info
 from threading import Thread
 from time import sleep as time_sleep
 
-import pytest
+from pytest import fixture, yield_fixture
 
 import eider
 
@@ -242,7 +242,7 @@ def native_function(s):
     return s + ' native'
 
 
-@pytest.fixture(scope='module')
+@fixture(scope='module')
 def server():
     t = Thread(target=eider.serve,
                args=[PORT, new_event_loop()],
@@ -257,13 +257,13 @@ def server():
     time_sleep(0.1)
 
 
-@pytest.yield_fixture(scope='module')
+@yield_fixture(scope='module')
 def conn(server):
     with eider.BlockingConnection(URL, root=LocalAPI, ws_lib=WS_LIB) as conn:
         yield conn
 
 
-@pytest.yield_fixture(scope='module')
+@yield_fixture(scope='module')
 def conn_async(server):
     conn = eider.Connection(URL, root=LocalAPI, ws_lib=WS_LIB)
     try:
@@ -273,50 +273,50 @@ def conn_async(server):
         get_event_loop().run_until_complete(conn.wait_closed())
 
 
-@pytest.yield_fixture
+@yield_fixture
 def lroot(conn):
     with conn.create_local_session() as lroot:
         yield lroot
 
 
-@pytest.yield_fixture
+@yield_fixture
 def rroot(conn):
     with conn.create_session() as rroot:
         yield rroot
 
 
-@pytest.yield_fixture
+@yield_fixture
 def rroot_async(conn_async):
     with conn_async.create_session() as rroot:
         yield rroot
 
 
-@pytest.yield_fixture
+@yield_fixture
 def rroot_codec(conn):
     with conn.create_session('json', 'json') as rroot:
         yield rroot
 
 
-@pytest.yield_fixture
+@yield_fixture
 def rroot_msgpack(conn):
     with conn.create_session('msgpack', 'msgpack') as rroot:
         yield rroot
 
 
-@pytest.yield_fixture(scope='module')
+@yield_fixture(scope='module')
 def conn_msgpack(server):
     with eider.BlockingConnection(
             URL, lformat='msgpack', ws_lib=WS_LIB) as conn:
         yield conn
 
 
-@pytest.yield_fixture
+@yield_fixture
 def rroot_bin(conn_msgpack):
     with conn_msgpack.create_session() as rroot:
         yield rroot
 
 
-@pytest.fixture(scope='module')
+@fixture(scope='module')
 def target(server):
     def run():
         @coroutine
@@ -332,7 +332,7 @@ def target(server):
     Thread(target=run, daemon=True).start()
 
 
-@pytest.yield_fixture
+@yield_fixture
 def broot(rroot, target):
     with rroot.bridge() as broot:
         yield broot
