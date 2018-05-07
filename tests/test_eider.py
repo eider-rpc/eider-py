@@ -32,7 +32,7 @@ from sys import version_info
 from threading import Thread
 from time import sleep as time_sleep
 
-from pytest import fixture, yield_fixture
+from pytest import fixture, raises, yield_fixture
 
 from eider import (
     async_for, Bridge, BlockingConnection, Connection, LocalObject, LocalRoot,
@@ -358,12 +358,8 @@ def test_cancel(rroot_async):
     loop = get_event_loop()
     fut = rroot_async.cancellable()
     loop.call_soon(fut.cancel)
-    try:
+    with raises(CancelledError):
         loop.run_until_complete(fut)
-    except CancelledError:
-        pass
-    else:
-        assert False
     assert loop.run_until_complete(rroot_async.cancelled())
 
 
@@ -394,30 +390,21 @@ def test_prop_auto(rroot):
 def test_prop_auto_forbidden(rroot):
     """Assign to a forbidden remote property."""
     rval = rroot.new_Value(4)
-    try:
+    with raises(AttributeError):
         rval.release = 6
-    except AttributeError:
-        return
-    assert False
 
 
 def test_error_notfound(rroot):
     """Call a nonexistent remote method."""
-    try:
+    with raises(AttributeError):
         rroot.foo(42)
-    except AttributeError:
-        return
-    assert False
 
 
 def test_error_runtime(rroot):
     """Call a remote method that raises an exception."""
-    try:
+    with raises(ZeroDivisionError) as exc_info:
         rroot.new_Value(42).divide(0)
-    except ZeroDivisionError as exc:
-        assert isinstance(exc.__cause__, RemoteError)
-        return
-    assert False
+    assert isinstance(exc_info.value.__cause__, RemoteError)
 
 
 def test_refcount(rroot):
@@ -450,22 +437,16 @@ def test_with(rroot):
     """Try to access a remote object after it has been released."""
     with rroot.new_Value(42) as rval:
         rval.add(1)
-    try:
+    with raises(LookupError):
         rval.val()
-    except LookupError:
-        return
-    assert False
 
 
 def test_session(conn):
     """Try to access a remote object after its session has been closed."""
     with conn.create_session() as rroot:
         rval = rroot.new_Value(0)
-    try:
+    with raises(LookupError):
         rval.val()
-    except LookupError:
-        return
-    assert False
 
 
 def test_iter(rroot):
@@ -541,22 +522,16 @@ def test_callback_sync(lroot, rroot):
 def test_callback_error_async(lroot, rroot):
     """Call an exception-raising local method remotely, without remote
     post-processing."""
-    try:
+    with raises(ZeroDivisionError):
         rroot.call(lroot.new_Value(42).divide, 0)
-    except ZeroDivisionError:
-        return
-    assert False
 
 
 def test_callback_error_sync(lroot, rroot):
     """Call an exception-raising local method remotely, with remote
     post-processing."""
     lval = lroot.new_Value(42)
-    try:
+    with raises(ZeroDivisionError):
         rroot.map(lval.divide, [3, 1, 0, 7])
-    except ZeroDivisionError:
-        return
-    assert False
 
 
 def test_callfront(rroot):
@@ -625,20 +600,14 @@ def test_bridge_session(rroot, target):
     """Try to access a bridged object after its bridge has been closed."""
     with rroot.bridge() as broot:
         bval = broot.new_Value(0)
-    try:
+    with raises(LookupError):
         bval.val()
-    except LookupError:
-        return
-    assert False
 
 
 def test_bridge_error(broot):
     """Call a bridged method that raises an exception."""
-    try:
+    with raises(ZeroDivisionError):
         broot.new_Value(42).divide(0)
-    except ZeroDivisionError:
-        return
-    assert False
 
 
 def test_bridge_callback(lroot, broot):
