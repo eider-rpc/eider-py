@@ -12,5 +12,5 @@ Full documentation is on [Read the Docs](http://eider.readthedocs.io/).
 python3 -m venv venv
 venv/bin/pip install -e .
 venv/bin/pip install -r requirements-dev.txt
-venv/bin/py.test
+venv/bin/pytest
 ```

@@ -32,7 +32,7 @@ from sys import version_info
 from threading import Thread
 from time import sleep as time_sleep
 
-from pytest import fixture, raises, yield_fixture
+from pytest import fixture, raises
 
 from eider import (
     async_for, Bridge, BlockingConnection, Connection, LocalObject, LocalRoot,
@@ -259,13 +259,13 @@ def server():
     time_sleep(0.1)
 
 
-@yield_fixture(scope='module')
+@fixture(scope='module')
 def conn(server):
     with BlockingConnection(URL, root=LocalAPI, ws_lib=WS_LIB) as conn:
         yield conn
 
 
-@yield_fixture(scope='module')
+@fixture(scope='module')
 def conn_async(server):
     conn = Connection(URL, root=LocalAPI, ws_lib=WS_LIB)
     try:
@@ -275,44 +275,44 @@ def conn_async(server):
         get_event_loop().run_until_complete(conn.wait_closed())
 
 
-@yield_fixture
+@fixture
 def lroot(conn):
     with conn.create_local_session() as lroot:
         yield lroot
 
 
-@yield_fixture
+@fixture
 def rroot(conn):
     with conn.create_session() as rroot:
         yield rroot
 
 
-@yield_fixture
+@fixture
 def rroot_async(conn_async):
     with conn_async.create_session() as rroot:
         yield rroot
 
 
-@yield_fixture
+@fixture
 def rroot_codec(conn):
     with conn.create_session('json', 'json') as rroot:
         yield rroot
 
 
-@yield_fixture
+@fixture
 def rroot_msgpack(conn):
     with conn.create_session('msgpack', 'msgpack') as rroot:
         yield rroot
 
 
-@yield_fixture(scope='module')
+@fixture(scope='module')
 def conn_msgpack(server):
     with BlockingConnection(
             URL, lformat='msgpack', ws_lib=WS_LIB) as conn:
         yield conn
 
 
-@yield_fixture
+@fixture
 def rroot_bin(conn_msgpack):
     with conn_msgpack.create_session() as rroot:
         yield rroot
@@ -334,7 +334,7 @@ def target(server):
     Thread(target=run, daemon=True).start()
 
 
-@yield_fixture
+@fixture
 def broot(rroot, target):
     with rroot.bridge() as broot:
         yield broot
