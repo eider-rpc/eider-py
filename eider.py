@@ -31,6 +31,7 @@ from inspect import getdoc, Parameter, signature, Signature
 from io import StringIO
 from json import dumps, loads as decode
 from logging import DEBUG, getLogger
+from sys import platform
 from threading import local
 from traceback import print_exception
 from types import FunctionType, MethodType
@@ -1491,23 +1492,14 @@ class Connection:
             logger.debug('{} {} {:3} {}'.format(tag, t, n, s[:512]))
 
 
-class PeriodicCall:
-    """Call a function periodically in an event loop.  This is preferable to
-    using a Task because it doesn't force client code to call
-    run_until_complete() after cancelling."""
-
-    def __init__(self, f, interval, loop=None):
-        self.f = f
-        self.interval = interval
-        self.loop = loop or get_event_loop()
-        self.handle = self.loop.call_later(interval, self.run)
-
-    def run(self):
-        self.f()
-        self.handle = self.loop.call_later(self.interval, self.run)
-
-    def cancel(self):
-        self.handle.cancel()
+if platform == 'win32':
+    # Wake up the event loop once every second to allow Ctrl+C to get through.
+    # http://stackoverflow.com/questions/27480967/why-does-the-asyncios-event-loop-suppress-the-keyboardinterrupt-on-windows
+    def enable_ctrl_c(loop):
+        loop.call_later(1, enable_ctrl_c, loop)
+else:
+    def enable_ctrl_c(loop):
+        pass
 
 
 class BlockingMethod(RemoteMethod):
@@ -1632,13 +1624,7 @@ class BlockingConnection:
     def __init__(self, url='ws://localhost:8080/', loop=None, **kwargs):
         if loop is None:
             loop = get_event_loop()
-
-        # Allow SIGINT (Ctrl+C) on Windows.  Supposedly this is fixed in Python
-        # 3.5.  See:
-        #   http://stackoverflow.com/questions/27480967/why-does-the-asyncios-event-loop-suppress-the-keyboardinterrupt-on-windows
-        #   http://stackoverflow.com/questions/24774980/why-cant-i-catch-sigint-when-asyncio-event-loop-is-running
-        self.busywait = PeriodicCall(lambda: None, 1, loop)
-
+        enable_ctrl_c(loop)
         self.conn = Connection(url, loop, **kwargs)
 
     def close(self):
@@ -1664,8 +1650,6 @@ class BlockingConnection:
             # using the connection.  So we swallow exceptions here to avoid
             # cluttering logs with redundant error messages.
             pass
-        finally:
-            self.busywait.cancel()
 
     # If this object is abandoned, make sure to close the underlying
     # asynchronous Connection; otherwise the Connection.receive() task will
@@ -1722,18 +1706,15 @@ def serve_aiohttp(port=8080, loop=None, handle_signals=True, **kwargs):
     app.router.add_route('GET', '/', handle)
     app.on_shutdown.append(on_shutdown)
 
-    # see comment for BlockingConnection.busywait
-    busywait = PeriodicCall(lambda: None, 1, loop)
-    try:
-        kwargs_run = {}
-        if aiohttp_ver >= (2,):
-            if aiohttp_ver < (3,):
-                kwargs_run['loop'] = loop
-            if aiohttp_ver >= (2, 2):
-                kwargs_run['handle_signals'] = handle_signals
-        run_app(app, port=port, **kwargs_run)
-    finally:
-        busywait.cancel()
+    enable_ctrl_c(loop)
+
+    kwargs_run = {}
+    if aiohttp_ver >= (2,):
+        if aiohttp_ver < (3,):
+            kwargs_run['loop'] = loop
+        if aiohttp_ver >= (2, 2):
+            kwargs_run['handle_signals'] = handle_signals
+    run_app(app, port=port, **kwargs_run)
 
 
 def serve_websockets(port=8080, loop=None, handle_signals=True, **kwargs):
@@ -1746,17 +1727,14 @@ def serve_websockets(port=8080, loop=None, handle_signals=True, **kwargs):
         conn = Connection(ws, loop, **kwargs)
         yield from conn.wait_closed()
 
-    # see comment for BlockingConnection.busywait
-    busywait = PeriodicCall(lambda: None, 1, loop)
+    enable_ctrl_c(loop)
+
+    server = loop.run_until_complete(ws_serve(handle, 'localhost', port))
     try:
-        server = loop.run_until_complete(ws_serve(handle, 'localhost', port))
-        try:
-            loop.run_forever()
-        finally:
-            server.close()
-            loop.run_until_complete(server.wait_closed())
+        loop.run_forever()
     finally:
-        busywait.cancel()
+        server.close()
+        loop.run_until_complete(server.wait_closed())
 
 
 def serve(port=8080, loop=None, handle_signals=True, ws_lib=WS_LIB_DEFAULT,
