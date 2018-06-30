@@ -441,6 +441,19 @@ def test_with(rroot):
         rval.val()
 
 
+if version_info >= (3, 5):
+    def test_async_with(rroot_async):
+        """Try to access an async remote object after it has been released."""
+        locals = {}
+        exec("""async def test(rroot_async):
+                    async with (await rroot_async.new_Value(42)) as rval:
+                        await rval.add(1)
+                    with raises(LookupError):
+                        await rval.val()
+             """, globals(), locals)
+        get_event_loop().run_until_complete(locals['test'](rroot_async))
+
+
 def test_session(conn):
     """Try to access a remote object after its session has been closed."""
     with conn.create_session() as rroot:

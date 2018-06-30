@@ -593,6 +593,17 @@ class RemoteMethod:
     def close(self):
         return self.robj._close()
 
+    @coroutine
+    def __aenter__(self):
+        return self
+
+    @coroutine
+    def __aexit__(self, exc_type, exc_value, traceback):
+        # Don't await -- see comment for RemoteObject.__aexit__().
+        self.close()
+
+    # Synchronous context manager for Python 3.4
+
     def __enter__(self):
         return self
 
@@ -669,6 +680,19 @@ class RemoteObject:
                     fut.set_result(None)
             did.add_done_callback(done)
         return fut
+
+    @coroutine
+    def __aenter__(self):
+        return self
+
+    @coroutine
+    def __aexit__(self, exc_type, exc_value, traceback):
+        # Most of the time, we don't care about the result of the release
+        # operation, so for efficiency, we don't await it here.  If the result
+        # ever does matter, _close() can be called explicitly.
+        self._close()
+
+    # Synchronous context manager for Python 3.4
 
     def __enter__(self):
         return self
@@ -851,6 +875,15 @@ class RemoteSessionManaged(RemoteSessionBase):
     def closed(self):
         return self._root._closed
 
+    @coroutine
+    def __aenter__(self):
+        return self.root()
+
+    @coroutine
+    def __aexit__(self, exc_type, exc_value, traceback):
+        # Don't await -- see comment for RemoteObject.__aexit__().
+        self.close()
+
 
 class RemoteSession(RemoteSessionManaged):
 
@@ -1002,7 +1035,7 @@ class Connection:
         return self
 
     @coroutine
-    def __aexit__(self, exc_type, exc_val, exc_tb):
+    def __aexit__(self, exc_type, exc_value, traceback):
         self.close()
         yield from self.task
 
