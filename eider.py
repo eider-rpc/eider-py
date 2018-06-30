@@ -599,8 +599,7 @@ class RemoteMethod:
 
     @coroutine
     def __aexit__(self, exc_type, exc_value, traceback):
-        # Don't await -- see comment for RemoteObject.__aexit__().
-        self.close()
+        yield from self.close()
 
     # Synchronous context manager for Python 3.4
 
@@ -687,10 +686,7 @@ class RemoteObject:
 
     @coroutine
     def __aexit__(self, exc_type, exc_value, traceback):
-        # Most of the time, we don't care about the result of the release
-        # operation, so for efficiency, we don't await it here.  If the result
-        # ever does matter, _close() can be called explicitly.
-        self._close()
+        yield from self._close()
 
     # Synchronous context manager for Python 3.4
 
@@ -881,8 +877,7 @@ class RemoteSessionManaged(RemoteSessionBase):
 
     @coroutine
     def __aexit__(self, exc_type, exc_value, traceback):
-        # Don't await -- see comment for RemoteObject.__aexit__().
-        self.close()
+        yield from self.close()
 
 
 class RemoteSession(RemoteSessionManaged):
