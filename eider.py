@@ -1724,6 +1724,7 @@ def serve_aiohttp(port=8080, loop=None, handle_signals=True, **kwargs):
 
         return ws
 
+    @coroutine
     def on_shutdown(app):
         for conn in conns:
             conn.close()
