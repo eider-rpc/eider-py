@@ -1543,6 +1543,25 @@ class BlockingObject(RemoteObject):
 
     __slots__ = ()
 
+    def _close(self):
+        self._rsession.conn.loop.run_until_complete(super()._close())
+
+    def __del__(self):
+        # Follow the same pattern as BlockingConnection._close(); see comments
+        # there.
+        try:
+            if (self._closed or self._rsession.closed() or
+                    self._rsession.conn.closed or
+                    self._rsession.conn.loop.is_closed()):
+                return
+
+            if self._rsession.conn.loop.is_running():
+                self._rsession.conn.loop.call_soon_threadsafe(super()._close)
+            else:
+                self._close()
+        except Exception:
+            pass
+
     def __getattr__(self, name):
         return BlockingMethod(self, name)
 
