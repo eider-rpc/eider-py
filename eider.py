@@ -1748,21 +1748,17 @@ def serve_aiohttp(port=8080, loop=None, handle_signals=True, **kwargs):
         for conn in conns:
             conn.close()
 
-    aiohttp_ver = tuple(map(int, aiohttp_version.split('.')))
-
-    app = Application(**({} if aiohttp_ver >= (2,) else {'loop': loop}))
+    app = Application()
     app.router.add_route('GET', '/', handle)
     app.on_shutdown.append(on_shutdown)
 
     enable_ctrl_c(loop)
 
     kwargs_run = {}
-    if aiohttp_ver >= (2,):
-        if aiohttp_ver < (3,):
-            kwargs_run['loop'] = loop
-        if aiohttp_ver >= (2, 2):
-            kwargs_run['handle_signals'] = handle_signals
-    run_app(app, port=port, **kwargs_run)
+    aiohttp_ver = tuple(map(int, aiohttp_version.split('.')))
+    if aiohttp_ver < (3,):
+        kwargs_run['loop'] = loop
+    run_app(app, port=port, handle_signals=handle_signals, **kwargs_run)
 
 
 def serve_websockets(port=8080, loop=None, handle_signals=True, **kwargs):

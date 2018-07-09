@@ -1,7 +1,7 @@
 # Packages listed here aren't strict dependencies of eider, but are needed to
 # run the tests.
 
-aiohttp>=1
+aiohttp>=2.3.10
 flake8
 msgpack
 pytest>=3
