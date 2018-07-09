@@ -5,6 +5,7 @@ aiohttp>=1
 flake8
 msgpack
 pytest>=3
+pytest-cov
 
 # websockets 4.0.1 has a SyntaxError under python 3.7
 websockets>=4;python_version<"3.7"

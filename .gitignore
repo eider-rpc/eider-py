@@ -1,7 +1,9 @@
 # Specific paths
+/.coverage
 /.pytest_cache/
 /dist/
 /eider.egg-info/
+/htmlcov/
 /venv/
 
 # General paths
