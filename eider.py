@@ -38,7 +38,7 @@ from inspect import getdoc, Parameter, signature, Signature
 from io import StringIO
 from json import dumps, loads as decode
 from logging import DEBUG, getLogger
-from sys import platform
+from sys import platform, version_info
 from threading import local
 from traceback import print_exception
 from types import FunctionType, MethodType
@@ -1064,8 +1064,12 @@ class Connection:
         yield from session.call(None, 'open', [rsid, rformat])
         return session
 
-    def create_session(self, lformat=None, rformat=None):
-        return CoroutineContextManager(self._create_session(lformat, rformat))
+    if version_info[:2] < (3, 5):
+        create_session = _create_session
+    else:
+        def create_session(self, lformat=None, rformat=None):
+            return CoroutineContextManager(
+                self._create_session(lformat, rformat))
 
     def close(self):
         if self.closed:
