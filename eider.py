@@ -194,6 +194,8 @@ else:
 
 def marshal_annotation(annot):
     # cf. inspect.formatannotation
+    if getattr(annot, '__module__', None) == 'typing':
+        return repr(annot).replace('typing.', '')
     if isinstance(annot, type):
         # give the class's __repr__ a chance to give us something eval-able
         r = repr(annot)
