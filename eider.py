@@ -383,6 +383,14 @@ class LocalSession(Session):
             raise LookupError('Unknown object: {}'.format(loid))
         return lobj
 
+    # In create_bridge, default formats to json rather than None because
+    # bridging peer probably doesn't need to decode and re-encode message
+    # bodies.
+    @coroutine
+    def create_bridge(self, rconn, lformat='json', rformat='json'):
+        rsession = yield from rconn.create_session(rformat=rformat)
+        return Bridge(self, rsession, lformat)
+
     def close(self):
         self.root().release()
 
@@ -848,23 +856,8 @@ class RemoteSessionManaged(RemoteSessionBase):
 
     __slots__ = ('_root',)
 
-    def __init__(self, conn, rsid, lformat=None, rformat=None, dstid=None):
+    def __init__(self, conn, rsid, lformat=None, dstid=None):
         super().__init__(conn, rsid, lformat, dstid)
-
-        # For efficiency, we want to allow the session to be used without
-        # having to wait first to see if the call to open it was successful.
-        # Pretty much the only way this call can fail is if the connection is
-        # closed.  And any subsequent uses of the session will fail loudly
-        # anyway, so we can safely swallow any exceptions here.
-        fut = self._open(rformat)
-        if fut is not None:
-            def done(did):
-                try:
-                    did.result()
-                except Exception:
-                    pass
-            fut.add_done_callback(done)
-
         self._root = self.unmarshal_id(None)
 
     def root(self):
@@ -886,14 +879,6 @@ class RemoteSession(RemoteSessionManaged):
 
     __slots__ = ()
 
-    def __init__(self, conn, lformat=None, rformat=None):
-        rsid = conn.nextrsid
-        conn.nextrsid += 1
-        super().__init__(conn, rsid, lformat, rformat)
-
-    def _open(self, rformat):
-        return self.call(None, 'open', [self.rsid, rformat])
-
     def close(self):
         return self._root._close()
 
@@ -904,14 +889,11 @@ class BridgedSession(RemoteSessionManaged):
 
     def __init__(self, bridge, spec):
         super().__init__(bridge._rsession.conn, spec['rsid'], spec['lformat'],
-                         dstid=spec['dst'])
+                         spec['dst'])
         self.bridge = bridge
 
         # the bridge automatically closes the session for us
         self._root._closed = True
-
-    def _open(self, rformat):
-        pass  # the bridge automatically opens the session for us
 
     def close(self):
         return self.bridge._close()
@@ -926,15 +908,11 @@ class Bridge(LocalObject):
 
     __slots__ = ('_rsession',)
 
-    def __init__(self, lsession, rconn,
-                 # Default formats to json rather than None because bridging
-                 # peer probably doesn't need to decode and re-encode message
-                 # bodies.
-                 lformat='json', rformat='json'):
+    def __init__(self, lsession, rsession, lformat):
         super().__init__(lsession)
-        self._rsession = RemoteSession(rconn, rformat=rformat)
-        self._lref['bridge'] = {'dst': rconn.id,
-                                'rsid': self._rsession.rsid,
+        self._rsession = rsession
+        self._lref['bridge'] = {'dst': rsession.conn.id,
+                                'rsid': rsession.rsid,
                                 'lformat': lformat}
 
     def _close(self):
@@ -1013,8 +991,13 @@ class Connection:
             self.nextlsid -= 1
         return LocalSession(self, lsid, root_factory, lformat)
 
+    @coroutine
     def create_session(self, lformat=None, rformat=None):
-        return RemoteSession(self, lformat, rformat)
+        rsid = self.nextrsid
+        self.nextrsid += 1
+        session = RemoteSession(self, rsid, lformat)
+        yield from session.call(None, 'open', [rsid, rformat])
+        return session
 
     def close(self):
         if self.closed:
@@ -1656,12 +1639,6 @@ class BlockingSession(BlockingSessionMixin, RemoteSession):
 
     ExternalSession = BlockingExternalSession
 
-    def _open(self, rformat):
-        # Efficiency is less of a concern here than in the asynchronous
-        # RemoteSession, so we raise immediately if the session cannot be
-        # opened.
-        self.conn.loop.run_until_complete(super()._open(rformat))
-
 
 class BlockingBridgedSession(BlockingSessionMixin, BridgedSession):
 
@@ -1709,7 +1686,12 @@ class BlockingConnection:
         return self.conn.create_local_session(*args, **kwargs)
 
     def create_session(self, lformat=None, rformat=None):
-        return BlockingSession(self.conn, lformat, rformat)
+        rsid = self.conn.nextrsid
+        self.conn.nextrsid += 1
+        session = BlockingSession(self.conn, rsid, lformat)
+        self.conn.loop.run_until_complete(
+            session.call(None, 'open', [rsid, rformat]))
+        return session
 
     def __enter__(self):
         return self

@@ -35,7 +35,7 @@ from time import sleep as time_sleep
 from pytest import fixture, raises
 
 from eider import (
-    async_for, Bridge, BlockingConnection, Connection, LocalObject, LocalRoot,
+    async_for, BlockingConnection, Connection, LocalObject, LocalRoot,
     OBJECT_ID, RemoteError, serve, unmarshal_signature)
 
 
@@ -219,7 +219,9 @@ class RemoteAPI(API):
 
     @coroutine
     def bridge(self):
-        return Bridge(self._lsession, (yield from RemoteAPI.target))
+        rconn = yield from RemoteAPI.target
+        bridge = yield from self._lsession.create_bridge(rconn)
+        return bridge
 
 
 class TargetAPI(API):
@@ -289,7 +291,8 @@ def rroot(conn):
 
 @fixture
 def rroot_async(conn_async):
-    with conn_async.create_session() as rroot:
+    session = get_event_loop().run_until_complete(conn_async.create_session())
+    with session as rroot:
         yield rroot
 
 
@@ -324,7 +327,8 @@ def target(server):
         @coroutine
         def receive():
             conn = Connection(URL, loop, root=TargetAPI, ws_lib=WS_LIB)
-            with conn.create_session() as rroot:
+            session = yield from conn.create_session()
+            with session as rroot:
                 yield from rroot.set_target()
             yield from conn.wait_closed()
 
