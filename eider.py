@@ -26,6 +26,13 @@ from asyncio import (
 from base64 import b64encode
 import builtins
 from collections import defaultdict
+
+try:
+    from collections.abc import Coroutine
+except ImportError:
+    # Python 3.4
+    Coroutine = object
+
 from functools import partial
 from inspect import getdoc, Parameter, signature, Signature
 from io import StringIO
@@ -107,6 +114,64 @@ def async_for(it, body, else_=None):
     else:
         if else_ is not None:
             yield from else_()
+
+
+class CoroutineContextManager(Coroutine):
+    """This class allows a coroutine that returns an async context manager
+    to be used directly in the 'async with' statement.  That is, instead of
+    being forced to write
+
+        y = await x()
+        async with y as z:
+            ...
+
+    you can just write
+
+        async with x() as z:
+            ...
+
+    This is a slight generalization of aiohttp's _RequestContextManager.
+    """
+
+    __slots__ = ('_coro', '_val')
+
+    def __init__(self, coro):
+        self._coro = coro
+
+    def send(self, value):
+        return self._coro.send(value)
+
+    def throw(self, typ, val=None, tb=None):
+        return self._coro.throw(typ, val, tb)
+
+    def close(self):
+        return self._coro.close()
+
+    def __iter__(self):
+        return self._coro.__iter__()
+
+    def __await__(self):
+        try:
+            aw = self._coro.__await__
+        except AttributeError:
+            # Create a native coroutine object to work around PEP492's
+            # restriction that the return value from __await__() must be an
+            # iterator.
+            ns = {'coro': self._coro}
+            exec("""async def native_coro():
+                        return await coro
+                 """, ns)
+            aw = ns['native_coro']().__await__
+        return aw()
+
+    @coroutine
+    def __aenter__(self):
+        self._val = val = yield from self._coro
+        return (yield from val.__aenter__())
+
+    @coroutine
+    def __aexit__(self, exc_type, exc_value, traceback):
+        yield from self._val.__aexit__(exc_type, exc_value, traceback)
 
 
 # Marker for marshallable object references within encoded data
@@ -992,12 +1057,15 @@ class Connection:
         return LocalSession(self, lsid, root_factory, lformat)
 
     @coroutine
-    def create_session(self, lformat=None, rformat=None):
+    def _create_session(self, lformat=None, rformat=None):
         rsid = self.nextrsid
         self.nextrsid += 1
         session = RemoteSession(self, rsid, lformat)
         yield from session.call(None, 'open', [rsid, rformat])
         return session
+
+    def create_session(self, lformat=None, rformat=None):
+        return CoroutineContextManager(self._create_session(lformat, rformat))
 
     def close(self):
         if self.closed:
