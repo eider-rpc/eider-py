@@ -1047,8 +1047,15 @@ class Connection:
     def wait_opened(self):
         opened = yield from self.opened
         if self.closed:
-            raise DisconnectedError(
+            derr = DisconnectedError(
                 'Connection closed' if opened else 'Could not connect')
+            # Finalize the receive task, so the user doesn't have to also call
+            # wait_closed().
+            try:
+                yield from self.task
+            except Exception as exc:
+                raise derr from exc
+            raise derr
 
     def create_local_session(self, lsid=None, root_factory=None, lformat=None):
         if lsid is None:
@@ -1084,6 +1091,7 @@ class Connection:
 
     @coroutine
     def __aenter__(self):
+        yield from self.wait_opened()
         return self
 
     @coroutine
@@ -1724,6 +1732,7 @@ class BlockingConnection:
             loop = get_event_loop()
         enable_ctrl_c(loop)
         self.conn = Connection(url, loop, **kwargs)
+        loop.run_until_complete(self.conn.wait_opened())
 
     def close(self):
         try:
