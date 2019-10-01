@@ -32,6 +32,12 @@ from sys import version_info
 from threading import Thread
 from time import sleep as time_sleep
 
+try:
+    from typing import Callable
+except ImportError:
+    class Callable:
+        pass
+
 from pytest import fixture, raises
 
 from eider import (

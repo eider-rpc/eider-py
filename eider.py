@@ -1521,7 +1521,7 @@ class Connection:
         else:
             try:
                 body = lcodec.encode(self, {'error': error})
-            except Exception as exc:
+            except Exception:
                 body = None
                 header['error'] = error
             else:
