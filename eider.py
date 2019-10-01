@@ -1189,6 +1189,8 @@ class Connection:
                 send_task.cancel()
                 try:
                     yield from send_task
+                except CancelledError:
+                    pass
                 except Exception as exc:
                     self.logger.error('{}: {}'.format(type(exc).__name__, exc),
                                       exc_info=True)
@@ -1536,19 +1538,16 @@ class Connection:
 
     @coroutine
     def send_forever(self):
-        try:
-            while 1:
-                data = yield from self.sendq.get()
-                self.log_data('send', data)
-                try:
-                    yield from self.ws_send(data)
-                except CancelledError:
-                    raise
-                except Exception as exc:
-                    self.logger.error('{}: {}'.format(type(exc).__name__, exc),
-                                      exc_info=True)
-        except CancelledError:
-            pass
+        while 1:
+            data = yield from self.sendq.get()
+            self.log_data('send', data)
+            try:
+                yield from self.ws_send(data)
+            except CancelledError:
+                raise
+            except Exception as exc:
+                self.logger.error(
+                    '{}: {}'.format(type(exc).__name__, exc), exc_info=True)
 
     @coroutine
     def ws_send_aiohttp(self, data):
