@@ -248,11 +248,11 @@ else:
 
     def msgpack_ext_hook(code, data):
         if code == 0:
-            return Reference(unpackb(data, encoding='utf-8'))
+            return Reference(unpackb(data, raw=False))
         return ExtType(code, data)
 
     def msgpack_decode(data):
-        return unpackb(data, encoding='utf-8', ext_hook=msgpack_ext_hook)
+        return unpackb(data, raw=False, ext_hook=msgpack_ext_hook)
 
     Codec('msgpack', msgpack_encode, msgpack_decode, False)
 

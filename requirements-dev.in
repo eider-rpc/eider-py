@@ -3,7 +3,7 @@
 
 aiohttp>=2.3.10
 flake8
-msgpack
+msgpack>=0.5.2
 pytest>=3
 pytest-cov
 
