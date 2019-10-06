@@ -47,7 +47,7 @@ from eider import (
 
 PORT = 12345
 URL = 'ws://localhost:{}/'.format(PORT)
-WS_LIB = environ.get('EIDER_WS_LIB', 'aiohttp')
+WS_LIB = environ.get('EIDER_PY_WS_LIB', 'aiohttp')
 
 
 if version_info >= (3, 6):

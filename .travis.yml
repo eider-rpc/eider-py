@@ -8,8 +8,8 @@ python:
     - pypy3.5
     - pypy3.6
 env:
-    - EIDER_WS_LIB=aiohttp
-    - EIDER_WS_LIB=websockets
+    - EIDER_PY_WS_LIB=aiohttp
+    - EIDER_PY_WS_LIB=websockets
 matrix:
     allow_failures:
         - python: 3.8-dev
