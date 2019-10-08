@@ -87,7 +87,7 @@ except ImportError:
 WS_LIB_DEFAULT = 'aiohttp' if aiohttp else 'websockets' if websockets else None
 
 
-__version__ = '0.13.0'
+__version__ = '1.0.0'
 
 
 try:
