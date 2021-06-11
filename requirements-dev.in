@@ -8,7 +8,7 @@ pytest>=3
 pytest-cov
 
 # websockets 8.0 drops Python 3.4 & 3.5 support
-websockets>=7,<8
+websockets>=7,<10
 
 # yarl 1.2 drops Python 3.4 support
 yarl>=1.1,<1.2
