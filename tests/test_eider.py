@@ -264,7 +264,7 @@ def server():
 
     # wait a bit to make sure the server is established (websockets is slower
     # than aiohttp)
-    time_sleep(0.1)
+    time_sleep(0.5 if WS_LIB == 'websockets' else 0.1)
 
 
 @fixture(scope='module')
