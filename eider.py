@@ -143,8 +143,8 @@ class CoroutineContextManager(Coroutine):
     def send(self, value):
         return self._coro.send(value)
 
-    def throw(self, typ, val=None, tb=None):
-        return self._coro.throw(typ, val, tb)
+    def throw(self, exc):
+        return self._coro.throw(exc)
 
     def close(self):
         return self._coro.close()
