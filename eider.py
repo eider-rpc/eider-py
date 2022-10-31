@@ -1864,7 +1864,7 @@ def serve_websockets(port=8080, loop=None, handle_signals=True, **kwargs):
 
     enable_ctrl_c(loop)
 
-    server = loop.run_until_complete(ws_serve(handle, 'localhost', port))
+    server = loop.run_until_complete(ws_serve(handle, None, port))
     try:
         loop.run_forever()
     finally:
