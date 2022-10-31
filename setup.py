@@ -22,7 +22,7 @@ setup(
     long_description=readme,
     url='https://github.com/eider-rpc/eider-py',
     author='Bart Robinson',
-    author_email='bart@bartrobinson.com',
+    author_email='bartdrobinson@gmail.com',
     license='Apache License 2.0',
     platforms='any',
     classifiers=[
