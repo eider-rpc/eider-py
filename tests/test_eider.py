@@ -45,9 +45,11 @@ from eider import (
     OBJECT_ID, RemoteError, serve, unmarshal_signature)
 
 
-PORT = 12345
-URL = 'ws://localhost:{}/'.format(PORT)
 WS_LIB = environ.get('EIDER_PY_WS_LIB', 'aiohttp')
+PORT = 12345
+if WS_LIB != 'aiohttp':
+    PORT += 1  # allow parallel execution
+URL = 'ws://localhost:{}/'.format(PORT)
 
 
 if version_info >= (3, 6):
