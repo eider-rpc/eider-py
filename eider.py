@@ -21,20 +21,14 @@
 """
 
 from asyncio import (
-    CancelledError, coroutine, Future, get_event_loop, iscoroutine, Queue,
+    CancelledError, create_task, Future, get_event_loop, Queue, new_event_loop,
     set_event_loop)
 from base64 import b64encode
 import builtins
 from collections import defaultdict
-
-try:
-    from collections.abc import Coroutine
-except ImportError:
-    # Python 3.4
-    Coroutine = object
-
+from collections.abc import Coroutine
 from functools import partial
-from inspect import getdoc, Parameter, signature, Signature
+from inspect import getdoc, iscoroutine, Parameter, signature, Signature
 from io import StringIO
 from json import dumps, loads as decode
 from logging import DEBUG, getLogger
@@ -46,8 +40,7 @@ from types import FunctionType, MethodType
 
 try:
     import aiohttp
-    from aiohttp import (
-        __version__ as aiohttp_version, ClientSession, WSCloseCode, WSMsgType)
+    from aiohttp import ClientSession, WSCloseCode, WSMsgType
     from aiohttp.web import Application, run_app, WebSocketResponse
 except ImportError:
     aiohttp = None
@@ -90,32 +83,22 @@ WS_LIB_DEFAULT = 'aiohttp' if aiohttp else 'websockets' if websockets else None
 __version__ = '1.0.0'
 
 
-try:
-    StopAsyncIteration = builtins.StopAsyncIteration  # added in Python 3.5
-except AttributeError:
-    class StopAsyncIteration(Exception):
-        pass
-
-
-@coroutine
-def async_for(iterable, body):
+async def async_for(iterable, body):
     """Like 'async for', but properly cleans up remote resources.  If PEP 533
     is ever accepted, we can define RemoteIterator.__aiterclose__ and deprecate
     this function in favor of plain 'async for'."""
     iterator = type(iterable).__aiter__(iterable)
     anext = type(iterator).__anext__
-    try:  # In Python 3.5+, this could be 'async with iterator:'.
+    async with iterator:
         while True:
             try:
-                x = yield from anext(iterator)
+                x = await anext(iterator)
             except StopAsyncIteration:
                 break
             else:
-                stop = yield from body(x)
+                stop = await body(x)
                 if stop is not None:
                     return stop
-    finally:
-        yield from iterator.close()
 
 
 class CoroutineContextManager(Coroutine):
@@ -153,27 +136,14 @@ class CoroutineContextManager(Coroutine):
         return self._coro.__iter__()
 
     def __await__(self):
-        try:
-            aw = self._coro.__await__
-        except AttributeError:
-            # Create a native coroutine object to work around PEP492's
-            # restriction that the return value from __await__() must be an
-            # iterator.
-            ns = {'coro': self._coro}
-            exec("""async def native_coro():
-                        return await coro
-                 """, ns)
-            aw = ns['native_coro']().__await__
-        return aw()
+        return self._coro.__await__()
 
-    @coroutine
-    def __aenter__(self):
-        self._val = val = yield from self._coro
-        return (yield from val.__aenter__())
+    async def __aenter__(self):
+        self._val = val = await self._coro
+        return (await val.__aenter__())
 
-    @coroutine
-    def __aexit__(self, exc_type, exc_value, traceback):
-        yield from self._val.__aexit__(exc_type, exc_value, traceback)
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self._val.__aexit__(exc_type, exc_value, traceback)
 
 
 # Marker for marshallable object references within encoded data
@@ -453,9 +423,8 @@ class LocalSession(Session):
     # In create_bridge, default formats to json rather than None because
     # bridging peer probably doesn't need to decode and re-encode message
     # bodies.
-    @coroutine
-    def create_bridge(self, rconn, lformat='json', rformat='json'):
-        rsession = yield from rconn.create_session(rformat=rformat)
+    async def create_bridge(self, rconn, lformat='json', rformat='json'):
+        rsession = await rconn.create_session(rformat=rformat)
         return Bridge(self, rsession, lformat)
 
     def close(self):
@@ -560,6 +529,13 @@ class LocalObjectBase:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self.release()
+
+    async def __aenter__(self):
+        self._nref += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.release()
 
 
@@ -670,21 +646,11 @@ class RemoteMethod:
     def close(self):
         return self.robj._close()
 
-    @coroutine
-    def __aenter__(self):
+    async def __aenter__(self):
         return self
 
-    @coroutine
-    def __aexit__(self, exc_type, exc_value, traceback):
-        yield from self.close()
-
-    # Synchronous context manager for Python 3.4
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.close()
 
     def help(self):
         return self.robj.help(self)
@@ -719,7 +685,7 @@ class RemoteObject:
         # If the session or the connection or the bridged connection is already
         # closed, then don't raise an error, because the remote object is
         # already dead.
-        fut = Future(loop=self._rsession.conn.loop)
+        fut = self._rsession.conn.loop.create_future()
         if self._closed:
             # object is already closed
             fut.set_result(None)
@@ -757,21 +723,11 @@ class RemoteObject:
             did.add_done_callback(done)
         return fut
 
-    @coroutine
-    def __aenter__(self):
+    async def __aenter__(self):
         return self
 
-    @coroutine
-    def __aexit__(self, exc_type, exc_value, traceback):
-        yield from self._close()
-
-    # Synchronous context manager for Python 3.4
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self._close()
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self._close()
 
     def __del__(self):
         # this can be executed in a different thread
@@ -795,8 +751,7 @@ class RemoteIterator:
     def __aiter__(self):
         return self
 
-    @coroutine
-    def __anext__(self):
+    async def __anext__(self):
         iter = self.iter
         if iter is None:
             raise StopAsyncIteration
@@ -804,7 +759,7 @@ class RemoteIterator:
         if iter == -1:
             # first call
             try:
-                iter = yield from self.robj.iter()
+                iter = await self.robj.iter()
             except AttributeError:
                 # fallback to sequence protocol
                 iter = 0
@@ -816,7 +771,7 @@ class RemoteIterator:
         if isinstance(iter, int):
             # sequence protocol
             try:
-                it = yield from self.robj.get(iter)
+                it = await self.robj.get(iter)
             except IndexError:
                 self.iter = None
                 raise StopAsyncIteration
@@ -829,12 +784,12 @@ class RemoteIterator:
         # JavaScript-style iteration protocol: use a 'done' flag instead of
         # StopIteration
         try:
-            it = yield from iter.next()
+            it = await iter.next()
             if it.get('done'):
                 raise StopAsyncIteration
         except Exception:
             self.iter = None
-            yield from iter._close()
+            await iter._close()
             raise
         return it['value']
 
@@ -843,25 +798,15 @@ class RemoteIterator:
         self.iter = None
         if isinstance(iter, RemoteObject):
             return iter._close()
-        fut = Future(loop=self.robj._rsession.conn.loop)
+        fut = self.robj._rsession.conn.loop.create_future()
         fut.set_result(None)
         return fut
 
-    @coroutine
-    def __aenter__(self):
+    async def __aenter__(self):
         return self
 
-    @coroutine
-    def __aexit__(self, exc_type, exc_value, traceback):
-        yield from self.close()
-
-    # Synchronous context manager for Python 3.4
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        self.close()
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.close()
 
 
 class RemoteCall(Future):
@@ -958,13 +903,11 @@ class RemoteSessionManaged(RemoteSessionBase):
     def closed(self):
         return self._root._closed
 
-    @coroutine
-    def __aenter__(self):
+    async def __aenter__(self):
         return self.root()
 
-    @coroutine
-    def __aexit__(self, exc_type, exc_value, traceback):
-        yield from self.close()
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.close()
 
 
 class RemoteSession(RemoteSessionManaged):
@@ -1065,21 +1008,20 @@ class Connection:
         self.id = registry.add(self)
 
         self.ws = None
-        self.sendq = Queue(loop=self.loop)
-        self.opened = Future(loop=self.loop)
+        self.sendq = Queue()
+        self.opened = self.loop.create_future()
         self.task = self.loop.create_task(self.receive(whither))
         self.closed = False
 
-    @coroutine
-    def wait_opened(self):
-        opened = yield from self.opened
+    async def wait_opened(self):
+        opened = await self.opened
         if self.closed:
             derr = DisconnectedError(
                 'Connection closed' if opened else 'Could not connect')
             # Finalize the receive task, so the user doesn't have to also call
             # wait_closed().
             try:
-                yield from self.task
+                await self.task
             except Exception as exc:
                 raise derr from exc
             raise derr
@@ -1090,20 +1032,16 @@ class Connection:
             self.nextlsid -= 1
         return LocalSession(self, lsid, root_factory, lformat)
 
-    @coroutine
-    def _create_session(self, lformat=None, rformat=None):
+    async def _create_session(self, lformat=None, rformat=None):
         rsid = self.nextrsid
         self.nextrsid += 1
         session = RemoteSession(self, rsid, lformat)
-        yield from session.call(None, 'open', [rsid, rformat])
+        await session.call(None, 'open', [rsid, rformat])
         return session
 
-    if version_info[:2] < (3, 5):
-        create_session = _create_session
-    else:
-        def create_session(self, lformat=None, rformat=None):
-            return CoroutineContextManager(
-                self._create_session(lformat, rformat))
+    def create_session(self, lformat=None, rformat=None):
+        return CoroutineContextManager(
+            self._create_session(lformat, rformat))
 
     def close(self):
         if self.closed:
@@ -1112,32 +1050,28 @@ class Connection:
         self.registry.remove(self.id)
         self.task.cancel()
 
-    @coroutine
-    def wait_closed(self):
-        yield from self.task
+    async def wait_closed(self):
+        await self.task
 
-    @coroutine
-    def __aenter__(self):
-        yield from self.wait_opened()
+    async def __aenter__(self):
+        await self.wait_opened()
         return self
 
-    @coroutine
-    def __aexit__(self, exc_type, exc_value, traceback):
+    async def __aexit__(self, exc_type, exc_value, traceback):
         self.close()
-        yield from self.task
+        await self.task
 
-    @coroutine
-    def receive(self, whither):
+    async def receive(self, whither):
         http_session = None
         close_code = WSCloseCode.OK
         send_task = None
         try:
             if isinstance(whither, str):
                 if self.ws_lib == 'websockets':
-                    self.ws = yield from ws_connect(whither, loop=self.loop)
+                    self.ws = await ws_connect(whither)
                 else:
-                    http_session = ClientSession(loop=self.loop)
-                    self.ws = yield from http_session.ws_connect(whither)
+                    http_session = ClientSession()
+                    self.ws = await http_session.ws_connect(whither)
             else:
                 self.ws = whither
 
@@ -1150,11 +1084,11 @@ class Connection:
 
             self.opened.set_result(True)
 
-            send_task = self.loop.create_task(self.send_forever())
+            send_task = create_task(self.send_forever())
 
             header = None
             while 1:
-                tp, data = yield from ws_recv()
+                tp, data = await ws_recv()
 
                 if tp in (WSMsgType.TEXT, WSMsgType.BINARY):
                     self.log_data('recv', data)
@@ -1215,16 +1149,16 @@ class Connection:
             if send_task is not None:
                 send_task.cancel()
                 try:
-                    yield from send_task
+                    await send_task
                 except CancelledError:
                     pass
                 except Exception as exc:
                     self.logger.error('{}: {}'.format(type(exc).__name__, exc),
                                       exc_info=True)
             if self.ws is not None:
-                yield from self.ws.close(code=close_code)
+                await self.ws.close(code=close_code)
             if http_session is not None:
-                yield from http_session.close()
+                await http_session.close()
 
     def dispatch(self, rcodec, header, body=None):
         dstid = header.get('dst')
@@ -1426,7 +1360,7 @@ class Connection:
     def on_applied(self, srcid, lcid, result, lcodec):
         if iscoroutine(result):
             # A method may be a coroutine ...
-            result = self.loop.create_task(result)
+            result = create_task(result)
         if isinstance(result, Future):
             # ... or it may return a Future ...
             if lcid is not None:
@@ -1563,34 +1497,30 @@ class Connection:
             if body is not None:
                 self.sendq.put_nowait(body)
 
-    @coroutine
-    def send_forever(self):
+    async def send_forever(self):
         while 1:
-            data = yield from self.sendq.get()
+            data = await self.sendq.get()
             self.log_data('send', data)
             try:
-                yield from self.ws_send(data)
+                await self.ws_send(data)
             except CancelledError:
                 raise
             except Exception as exc:
                 self.logger.error(
                     '{}: {}'.format(type(exc).__name__, exc), exc_info=True)
 
-    @coroutine
-    def ws_send_aiohttp(self, data):
+    async def ws_send_aiohttp(self, data):
         if isinstance(data, str):
-            yield from self.ws.send_str(data)
+            await self.ws.send_str(data)
         else:
-            yield from self.ws.send_bytes(data)
+            await self.ws.send_bytes(data)
 
-    @coroutine
-    def ws_recv_aiohttp(self):
-        tp, data, extra = yield from self.ws.receive()
+    async def ws_recv_aiohttp(self):
+        tp, data, extra = await self.ws.receive()
         return tp, data
 
-    @coroutine
-    def ws_recv_websockets(self):
-        data = yield from self.ws.recv()
+    async def ws_recv_websockets(self):
+        data = await self.ws.recv()
         if isinstance(data, str):
             tp = WSMsgType.TEXT
         else:
@@ -1611,9 +1541,9 @@ class Connection:
             logger.debug('{} {} {:3} {}'.format(tag, t, n, s[:512]))
 
 
-if platform == 'win32':
+if platform == 'win32' and version_info[:2] < (3, 8):
     # Wake up the event loop once every second to allow Ctrl+C to get through.
-    # http://stackoverflow.com/questions/27480967/why-does-the-asyncios-event-loop-suppress-the-keyboardinterrupt-on-windows
+    # https://github.com/python/cpython/issues/67246
     def enable_ctrl_c(loop):
         loop.call_later(1, enable_ctrl_c, loop)
 else:
@@ -1636,6 +1566,12 @@ class BlockingObject(RemoteObject):
 
     def _close(self):
         self._rsession.conn.loop.run_until_complete(super()._close())
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._close()
 
     def __del__(self):
         # Follow the same pattern as BlockingConnection._close(); see comments
@@ -1754,8 +1690,14 @@ class BlockingBridgedSession(BlockingSessionMixin, BridgedSession):
 class BlockingConnection:
 
     def __init__(self, url='ws://localhost:8080/', loop=None, **kwargs):
+        # In Python 3.11, we could use asyncio.Runner instead of this awkward
+        # loop management.
         if loop is None:
-            loop = get_event_loop()
+            self.own_loop = True
+            loop = new_event_loop()
+            set_event_loop(loop)
+        else:
+            self.own_loop = False
         enable_ctrl_c(loop)
         self.conn = Connection(url, loop, **kwargs)
         loop.run_until_complete(self.conn.wait_opened())
@@ -1773,8 +1715,13 @@ class BlockingConnection:
             # want to reentrantly run the loop, because that would cause
             # problems for the outer loop.  But if not, we want to wait for the
             # connection to properly close.
-            if not self.conn.loop.is_running():
-                self.conn.loop.run_until_complete(self.conn.wait_closed())
+            loop = self.conn.loop
+            if not loop.is_running():
+                loop.run_until_complete(self.conn.wait_closed())
+
+            if self.own_loop:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
         except Exception:
             # Lots of reasons we could get an exception - the loop could be
             # already closed during garbage collection, or the connection could
@@ -1807,35 +1754,35 @@ class BlockingConnection:
         self.close()
 
 
-@coroutine
-def receive(url='ws://localhost:8080/', loop=None, **kwargs):
+async def receive(url='ws://localhost:8080/', loop=None, **kwargs):
     conn = Connection(url, loop, **kwargs)
-    yield from conn.wait_closed()
+    await conn.wait_closed()
 
 
 def serve_aiohttp(port=8080, loop=None, handle_signals=True, **kwargs):
     if loop is None:
-        loop = get_event_loop()
-    set_event_loop(loop)
+        own_loop = True
+        loop = new_event_loop()
+        set_event_loop(loop)
+    else:
+        own_loop = False
 
     conns = []
 
-    @coroutine
-    def handle(request):
+    async def handle(request):
         ws = WebSocketResponse()
-        yield from ws.prepare(request)
+        await ws.prepare(request)
 
-        conn = Connection(ws, loop, **kwargs)
+        conn = Connection(ws, **kwargs)
         conns.append(conn)
         try:
-            yield from conn.wait_closed()
+            await conn.wait_closed()
         finally:
             conns.remove(conn)
 
         return ws
 
-    @coroutine
-    def on_shutdown(app):
+    async def on_shutdown(app):
         for conn in conns:
             conn.close()
 
@@ -1844,32 +1791,40 @@ def serve_aiohttp(port=8080, loop=None, handle_signals=True, **kwargs):
     app.on_shutdown.append(on_shutdown)
 
     enable_ctrl_c(loop)
-
-    kwargs_run = {}
-    aiohttp_ver = tuple(map(int, aiohttp_version.split('.')))
-    if aiohttp_ver < (3,):
-        kwargs_run['loop'] = loop
-    run_app(app, port=port, handle_signals=handle_signals, **kwargs_run)
+    try:
+        run_app(app, port=port, handle_signals=handle_signals)
+    finally:
+        if own_loop:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
 
 
 def serve_websockets(port=8080, loop=None, handle_signals=True, **kwargs):
     if loop is None:
-        loop = get_event_loop()
-    set_event_loop(loop)
+        own_loop = True
+        loop = new_event_loop()
+        set_event_loop(loop)
+    else:
+        own_loop = False
 
-    @coroutine
-    def handle(ws, path):
+    async def handle(ws, path):
         conn = Connection(ws, loop, **kwargs)
-        yield from conn.wait_closed()
+        await conn.wait_closed()
+
+    async def create_server():
+        return await ws_serve(handle, None, port)
 
     enable_ctrl_c(loop)
 
-    server = loop.run_until_complete(ws_serve(handle, None, port))
+    server = loop.run_until_complete(create_server())
     try:
         loop.run_forever()
     finally:
         server.close()
         loop.run_until_complete(server.wait_closed())
+        if own_loop:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
 
 
 def serve(port=8080, loop=None, handle_signals=True, ws_lib=WS_LIB_DEFAULT,

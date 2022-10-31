@@ -20,29 +20,22 @@
     Unit tests for eider.
 """
 
-from asyncio import (
-    CancelledError, coroutine, get_event_loop, Future, new_event_loop, sleep)
+from asyncio import CancelledError, new_event_loop, set_event_loop, sleep
 from functools import reduce
 from gc import collect
 from inspect import signature
 from numbers import Number
 from operator import mul
 from os import environ
-from sys import version_info
 from threading import Thread
 from time import sleep as time_sleep
-
-try:
-    from typing import Callable
-except ImportError:
-    class Callable:
-        pass
+from typing import Callable
 
 from pytest import fixture, raises
 
 from eider import (
-    async_for, BlockingConnection, Connection, LocalObject, LocalRoot,
-    OBJECT_ID, RemoteError, serve, unmarshal_signature)
+    BlockingConnection, Connection, LocalObject, LocalRoot, OBJECT_ID,
+    RemoteError, serve, unmarshal_signature)
 
 
 WS_LIB = environ.get('EIDER_PY_WS_LIB', 'aiohttp')
@@ -52,31 +45,9 @@ if WS_LIB != 'aiohttp':
 URL = 'ws://localhost:{}/'.format(PORT)
 
 
-if version_info >= (3, 6):
-    # Python 3.6 has async comprehensions
-    exec("""async def aiter2list(it):
-                them = await it
-                return [x async for x in them]
-         """)
-
-elif version_info >= (3, 5):
-    # Python 3.5 has 'async for'
-    exec("""async def aiter2list(it):
-                them = await it
-                xs = []
-                async for x in them:
-                    xs.append(x)
-                return xs
-         """)
-
-else:
-    # Python 3.4 doesn't have built-in support for async iterators
-    @coroutine
-    def aiter2list(it):
-        them = yield from it
-        xs = []
-        yield from async_for(them, coroutine(xs.append))
-        return xs
+async def aiter2list(it):
+    them = await it
+    return [x async for x in them]
 
 
 class Value(LocalObject):
@@ -89,30 +60,24 @@ class Value(LocalObject):
     def val(self):
         return self._x
 
-    @coroutine
-    def set_val(self, x):
-        self._x = (yield from get_value(x))
+    async def set_val(self, x):
+        self._x = (await get_value(x))
 
-    @coroutine
-    def add(self, x):
+    async def add(self, x):
         """Add another value to the value."""
-        self._x += (yield from get_value(x))
+        self._x += (await get_value(x))
 
-    @coroutine
-    def subtract(self, x):
-        self._x -= (yield from get_value(x))
+    async def subtract(self, x):
+        self._x -= (await get_value(x))
 
-    @coroutine
-    def multiply(self, x):
-        self._x *= (yield from get_value(x))
+    async def multiply(self, x):
+        self._x *= (await get_value(x))
 
-    @coroutine
-    def divide(self, x):
-        self._x /= (yield from get_value(x))
+    async def divide(self, x):
+        self._x /= (await get_value(x))
 
 
-@coroutine
-def get_value(x):
+async def get_value(x):
     # x may be a number, a local Value, or a remote Value
     if isinstance(x, Number):
         return x  # number
@@ -121,7 +86,7 @@ def get_value(x):
         if isinstance(x, Number):
             return x  # local Value
         else:
-            return (yield from x)  # remote Value
+            return (await x)  # remote Value
 
 
 class Range(LocalObject):
@@ -191,8 +156,8 @@ class RemoteAPI(API):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if RemoteAPI.target is None:
-            RemoteAPI.target = Future(loop=self._lsession.conn.loop)
-        self._cancelled = Future(loop=self._lsession.conn.loop)
+            RemoteAPI.target = self._lsession.conn.loop.create_future()
+        self._cancelled = self._lsession.conn.loop.create_future()
 
     def sum(self, *args):
         return sum(args)
@@ -200,35 +165,32 @@ class RemoteAPI(API):
     def cancellable(self):
         def on_done(fut):
             self._cancelled.set_result(fut.cancelled())
-        fut = Future(loop=self._lsession.conn.loop)
+        fut = self._lsession.conn.loop.create_future()
         fut.add_done_callback(on_done)
         return fut
 
-    @coroutine
-    def cancelled(self):
-        return (yield from self._cancelled)
+    async def cancelled(self):
+        return (await self._cancelled)
 
-    @coroutine
-    def map(self, f: 'Callable', xs: list, async_=True) -> list:
+    async def map(self, f: 'Callable', xs: list, async_=True) -> list:
         if async_:
             ys = []
             for x in xs:
-                ys.append((yield from f(x)))
+                ys.append((await f(x)))
             return ys
         else:
             return list(map(f, xs))
 
-    def getattr(self, obj, attr):
-        with obj as o:
+    async def getattr(self, obj, attr):
+        async with obj as o:
             return getattr(o, attr)
 
     def set_target(self):
         RemoteAPI.target.set_result(self._lsession.conn)
 
-    @coroutine
-    def bridge(self):
-        rconn = yield from RemoteAPI.target
-        bridge = yield from self._lsession.create_bridge(rconn)
+    async def bridge(self):
+        rconn = await RemoteAPI.target
+        bridge = await self._lsession.create_bridge(rconn)
         return bridge
 
 
@@ -257,7 +219,7 @@ def native_function(s):
 @fixture(scope='module')
 def server():
     t = Thread(target=serve,
-               args=[PORT, new_event_loop()],
+               args=[PORT],
                kwargs={'root': RemoteAPI,
                        'handle_signals': False,
                        'ws_lib': WS_LIB},
@@ -270,19 +232,30 @@ def server():
 
 
 @fixture(scope='module')
-def conn(server):
-    with BlockingConnection(URL, root=LocalAPI, ws_lib=WS_LIB) as conn:
+def loop():
+    loop = new_event_loop()
+    set_event_loop(loop)
+    try:
+        yield loop
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+
+
+@fixture(scope='module')
+def conn(server, loop):
+    with BlockingConnection(URL, loop, root=LocalAPI, ws_lib=WS_LIB) as conn:
         yield conn
 
 
 @fixture(scope='module')
-def conn_async(server):
-    conn = Connection(URL, root=LocalAPI, ws_lib=WS_LIB)
+def conn_async(server, loop):
+    conn = Connection(URL, loop, root=LocalAPI, ws_lib=WS_LIB)
     try:
         yield conn
     finally:
         conn.close()
-        get_event_loop().run_until_complete(conn.wait_closed())
+        loop.run_until_complete(conn.wait_closed())
 
 
 @fixture
@@ -298,8 +271,8 @@ def rroot(conn):
 
 
 @fixture
-def rroot_async(conn_async):
-    session = get_event_loop().run_until_complete(conn_async.create_session())
+def rroot_async(conn_async, loop):
+    session = loop.run_until_complete(conn_async.create_session())
     with session as rroot:
         yield rroot
 
@@ -317,9 +290,9 @@ def rroot_msgpack(conn):
 
 
 @fixture(scope='module')
-def conn_msgpack(server):
+def conn_msgpack(server, loop):
     with BlockingConnection(
-            URL, lformat='msgpack', ws_lib=WS_LIB) as conn:
+            URL, loop, lformat='msgpack', ws_lib=WS_LIB) as conn:
         yield conn
 
 
@@ -332,13 +305,12 @@ def rroot_bin(conn_msgpack):
 @fixture(scope='module')
 def target(server):
     def run():
-        @coroutine
-        def receive():
+        async def receive():
             conn = Connection(URL, loop, root=TargetAPI, ws_lib=WS_LIB)
-            session = yield from conn.create_session()
+            session = await conn.create_session()
             with session as rroot:
-                yield from rroot.set_target()
-            yield from conn.wait_closed()
+                await rroot.set_target()
+            await conn.wait_closed()
 
         loop = new_event_loop()
         loop.run_until_complete(receive())
@@ -357,17 +329,15 @@ def test_call(rroot):
     assert 17 == rroot.sum(3, 5, 9)
 
 
-def test_call_async(rroot_async):
+def test_call_async(rroot_async, loop):
     """Call a remote method asynchronously."""
-    @coroutine
-    def test():
-        return (yield from rroot_async.sum(33, 55, 99))
-    assert 187 == get_event_loop().run_until_complete(test())
+    async def test():
+        return (await rroot_async.sum(33, 55, 99))
+    assert 187 == loop.run_until_complete(test())
 
 
-def test_cancel(rroot_async):
+def test_cancel(rroot_async, loop):
     """Cancel a remote method call."""
-    loop = get_event_loop()
     fut = rroot_async.cancellable()
     loop.call_soon(fut.cancel)
     with raises(CancelledError):
@@ -427,7 +397,7 @@ def test_refcount(rroot):
     assert n == rroot.num_objects()
 
 
-def test_gc(rroot):
+def test_gc(rroot, loop):
     """Garbage-collect a remote object."""
     n = rroot.num_objects()
     rval = rroot.new_Value(0)
@@ -438,7 +408,7 @@ def test_gc(rroot):
     # completes.  This may take several calls to gc.collect() on PyPy.
     for _ in range(10):
         collect()
-        get_event_loop().run_until_complete(sleep(0.1))
+        loop.run_until_complete(sleep(0.1))
         if n == rroot.num_objects():
             break
     else:
@@ -453,17 +423,14 @@ def test_with(rroot):
         rval.val()
 
 
-if version_info >= (3, 5):
-    def test_async_with(rroot_async):
-        """Try to access an async remote object after it has been released."""
-        locals = {}
-        exec("""async def test(rroot_async):
-                    async with (await rroot_async.new_Value(42)) as rval:
-                        await rval.add(1)
-                    with raises(LookupError):
-                        await rval.val()
-             """, globals(), locals)
-        get_event_loop().run_until_complete(locals['test'](rroot_async))
+def test_async_with(rroot_async, loop):
+    """Try to access an async remote object after it has been released."""
+    async def test():
+        async with (await rroot_async.new_Value(42)) as rval:
+            await rval.add(1)
+        with raises(LookupError):
+            await rval.val()
+    loop.run_until_complete(test())
 
 
 def test_session(conn):
@@ -479,9 +446,9 @@ def test_iter(rroot):
     assert [3, 4, 5, 6] == [x for x in rroot.new_Range(3, 7)]
 
 
-def test_iter_async(rroot_async):
+def test_iter_async(rroot_async, loop):
     """Iterate over a remote object asynchronously."""
-    assert [38, 39, 40, 41] == get_event_loop().run_until_complete(
+    assert [38, 39, 40, 41] == loop.run_until_complete(
         aiter2list(rroot_async.new_Range(38, 42)))
 
 
@@ -491,10 +458,10 @@ def test_iter_seq(rroot):
     assert seq == [x for x in rroot.new_Sequence(seq)]
 
 
-def test_iter_seq_async(rroot_async):
+def test_iter_seq_async(rroot_async, loop):
     """Iterate over a remote sequence asynchronously."""
     seq = ['foo', 'baz', 99, 'eggs']
-    assert seq == get_event_loop().run_until_complete(
+    assert seq == loop.run_until_complete(
         aiter2list(rroot_async.new_Sequence(seq)))
 
 
