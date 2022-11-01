@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eider"
+version = "1.0.0"
+authors = [
+  { name="Bart Robinson", email="bartdrobinson@gmail.com" },
+]
+description = """\
+    An object-oriented, asynchronous, late-binding, web-first, polyglot \
+    RPC protocol"""
+readme = "README.rst"
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Object Brokering",
+    "Topic :: System :: Distributed Computing",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/eider-rpc/eider-py"
+"Bug Tracker" = "https://github.com/eider-rpc/eider-py/issues"
+
+[tool.setuptools]
+py-modules = [
+    "eider"
+]
