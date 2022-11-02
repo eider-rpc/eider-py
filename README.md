@@ -14,3 +14,11 @@ venv/bin/pip install -e .
 venv/bin/pip install -r requirements-dev.txt
 venv/bin/pytest
 ```
+
+## Python version compatibility
+
+Version 2.0 of this package dropped support for Python 3.4-3.6 in order to take
+advantage of modern Python features (e.g. `async`/`await` syntax).  If you need
+to support those older Python versions, use version 1.x of this package.  The
+two implementations are entirely compatible with each other over the wire; no
+changes were made to the Eider RPC protocol.
