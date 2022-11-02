@@ -1180,7 +1180,7 @@ class Connection:
                         msg = rcodec.decode(body)
 
                     result = self.apply_begin(rcodec, srcid, method, msg)
-                except Exception as exc:
+                except (CancelledError, Exception) as exc:
                     self.on_error(srcid, cid, exc)
                 else:
                     if isinstance(result, Future):
@@ -1197,7 +1197,7 @@ class Connection:
                         try:
                             result = self.apply_finish(
                                 rcodec, srcid, method, lsession, loid, msg)
-                        except Exception as exc:
+                        except (CancelledError, Exception) as exc:
                             self.on_error(srcid, cid, exc, lcodec)
                         else:
                             self.on_applied(srcid, cid, result, lcodec)
@@ -1233,7 +1233,7 @@ class Connection:
 
                             result = self.getresult(rcodec, rcall.rsession,
                                                     msg)
-                        except Exception as exc:
+                        except (CancelledError, Exception) as exc:
                             rcall.set_exception(exc)
                         else:
                             rcall.set_result(result)
@@ -1343,7 +1343,7 @@ class Connection:
     def on_apply_begin_done(self, srcid, lcid, fut):
         try:
             lcodec, fut = fut.result()
-        except Exception as exc:
+        except (CancelledError, Exception) as exc:
             self.on_error(srcid, lcid, exc)
         else:
             fut.add_done_callback(
@@ -1352,7 +1352,7 @@ class Connection:
     def on_apply_finish_done(self, srcid, lcid, lcodec, fut):
         try:
             result = fut.result()
-        except Exception as exc:
+        except (CancelledError, Exception) as exc:
             self.on_error(srcid, lcid, exc, lcodec)
         else:
             self.on_applied(srcid, lcid, result, lcodec)
@@ -1391,7 +1391,7 @@ class Connection:
         self.lcalls.pop(lcid, None)
         try:
             result = fut.result()
-        except Exception as exc:
+        except (CancelledError, Exception) as exc:
             self.on_error(srcid, lcid, exc, lcodec)
         else:
             self.on_result(srcid, lcid, result, lcodec)
