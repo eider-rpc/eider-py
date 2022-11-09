@@ -80,7 +80,7 @@ except ImportError:
 WS_LIB_DEFAULT = 'aiohttp' if aiohttp else 'websockets' if websockets else None
 
 
-__version__ = '2.0.0'
+__version__ = '2.0.1'
 
 
 async def async_for(iterable, body):
