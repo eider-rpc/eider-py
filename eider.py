@@ -816,19 +816,19 @@ class RemoteCall(Future):
         self.rsession = rsession
         self.rcid = rcid
 
-    def cancel(self):
+    def cancel(self, msg=None):
         rsession = self.rsession
         rcid = self.rcid
         conn = rsession.conn
         if conn.rcalls.pop(rcid, None) is None:
             return False
 
-        msg = {'cancel': rcid}
+        m = {'cancel': rcid}
         dstid = rsession.dstid
         if dstid is not None:
-            msg['dst'] = dstid
-        conn.send(msg)
-        return super().cancel()
+            m['dst'] = dstid
+        conn.send(m)
+        return super().cancel() if msg is None else super().cancel(msg)
 
 
 class RemoteSessionBase(Session):
